@@ -153,6 +153,24 @@ export default function App() {
   const [lemonSqueezyWebhookSecret, setLemonSqueezyWebhookSecret] = useState("");
   const [isSavingLsSettings, setIsSavingLsSettings] = useState(false);
 
+  const calculateStorageUsed = () => {
+    let totalMB = 0;
+    documents.forEach(d => {
+      if (d.size.includes("MB")) {
+        totalMB += parseFloat(d.size.replace("MB", "").trim());
+      } else if (d.size.includes("KB")) {
+        totalMB += parseFloat(d.size.replace("KB", "").trim()) / 1024;
+      }
+    });
+    return totalMB;
+  };
+
+  const formatStorageLimit = (mb?: number) => {
+    if (!mb) return "100 MB";
+    if (mb >= 1024) return `${(mb / 1024).toFixed(0)} GB`;
+    return `${mb} MB`;
+  };
+
   // Canvas Ref for Signature
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -325,9 +343,12 @@ export default function App() {
         setDocuments(prev => [newDoc, ...prev]);
         triggerToast(`Successfully uploaded ${file.name} to cloud vault`, "success");
         loadDatabaseContext();
+      } else {
+        const errData = await res.json();
+        triggerToast(errData.error || "Upload failed", "error");
       }
-    } catch (err) {
-      triggerToast("Upload failed", "error");
+    } catch (err: any) {
+      triggerToast(err.message || "Upload failed", "error");
     }
   };
 
@@ -597,6 +618,18 @@ export default function App() {
     setProcessingStatus("Initializing document compiler...");
 
     try {
+      // Record PDF operation & deduct credit from active plan limits
+      const recordRes = await apiFetch("/api/billing/record-operation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolName: PDF_TOOLS.find(t => t.id === activeToolId)?.name })
+      });
+      if (!recordRes.ok) {
+        const errData = await recordRes.json();
+        throw new Error(errData.error || "Operation failed. Out of daily usage limits.");
+      }
+      loadDatabaseContext(); // Refresh current credits in UI
+
       let resultBytes: Uint8Array | null = null;
       let outputFileName = `AeroPDF_${activeToolId}.pdf`;
 
@@ -1390,9 +1423,19 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             {/* Header greeting */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-6">
               <div>
-                <h1 className="text-2xl sm:text-4xl font-display font-extrabold text-white">Professional Console</h1>
+                <h1 className="text-2xl sm:text-4xl font-display font-extrabold text-white">
+                  {subscription?.planName === "Enterprise"
+                    ? "Enterprise Control Center"
+                    : subscription?.planName === "Professional"
+                    ? "Professional Console"
+                    : "Free Workspace Console"}
+                </h1>
                 <p className="text-gray-400 text-xs mt-1">
-                  Manage file vaults, monitor AI quotas, and check active document pipelines securely.
+                  {subscription?.planName === "Enterprise"
+                    ? "Monitor global compliance pipelines, manage unlimited vaults, and audit developer logs securely."
+                    : subscription?.planName === "Professional"
+                    ? "Manage file vaults, monitor AI quotas, and check active document pipelines securely."
+                    : "Access standard client-side PDF tools, upload files up to 10 MB, and track your daily operation logs."}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -1403,7 +1446,14 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   Launch PDF Tool
                 </button>
                 <button
-                  onClick={() => setCurrentTab("ai-workspace")}
+                  onClick={() => {
+                    if (subscription?.planName === "Free") {
+                      setCurrentTab("billing");
+                      triggerToast("Upgrade to Professional to access the AI Workspace!", "info");
+                    } else {
+                      setCurrentTab("ai-workspace");
+                    }
+                  }}
                   className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow transition flex items-center gap-1.5"
                 >
                   <Sparkles className="w-3.5 h-3.5" /> Start AI Summary
@@ -1419,40 +1469,88 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   <span>Vault Storage</span>
                   <Database className="w-4 h-4 text-indigo-400" />
                 </div>
-                <div className="text-2xl font-bold text-white">5.45 MB <span className="text-xs text-gray-500 font-normal">of 10 GB</span></div>
+                <div className="text-2xl font-bold text-white">
+                  {calculateStorageUsed().toFixed(2)} MB{" "}
+                  <span className="text-xs text-gray-500 font-normal">of {formatStorageLimit(subscription?.storageTotal)}</span>
+                </div>
                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div className="w-[1%] h-full bg-indigo-500"></div>
+                  <div 
+                    className="h-full bg-indigo-500" 
+                    style={{ width: `${Math.min(100, subscription?.storageTotal ? (calculateStorageUsed() / subscription.storageTotal) * 100 : 0)}%` }}
+                  ></div>
                 </div>
-                <div className="text-[10px] text-gray-500">0.05% of resources utilized</div>
+                <div className="text-[10px] text-gray-500">
+                  {(subscription?.storageTotal ? (calculateStorageUsed() / subscription.storageTotal) * 100 : 0).toFixed(2)}% of resources utilized
+                </div>
               </div>
 
-              <div className="p-5 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-3">
-                <div className="flex justify-between items-center text-xs text-gray-400">
-                  <span>API Key Status</span>
-                  <Key className="w-4 h-4 text-emerald-400" />
+              {subscription?.planName === "Enterprise" ? (
+                <div className="p-5 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-3">
+                  <div className="flex justify-between items-center text-xs text-gray-400">
+                    <span>API Key Status</span>
+                    <Key className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-bold text-white">{apiKeys.length} Active</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">ap_live_dev_active</div>
+                  <div className="text-[10px] text-gray-500">Developer API pipeline ready</div>
                 </div>
-                <div className="text-2xl font-bold text-white">{apiKeys.length} Active</div>
-                <div className="text-[10px] text-emerald-400 font-mono">ap_live_dev_active</div>
-                <div className="text-[10px] text-gray-500">Developer API pipeline ready</div>
-              </div>
+              ) : (
+                <div className="p-5 rounded-2xl border border-slate-800/80 bg-[#0e1424]/40 space-y-3 relative overflow-hidden group flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center text-xs text-gray-400">
+                      <span>API Key Status</span>
+                      <Lock className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div className="text-lg font-bold text-gray-600 mt-2 filter blur-[1.5px]">ap_live_restricted</div>
+                    <div className="text-[10px] text-gray-500 mt-1">Enterprise Developer Feature</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCurrentTab("billing");
+                      triggerToast("Upgrade to Enterprise to generate developer keys!", "info");
+                    }}
+                    className="w-full py-1.5 bg-slate-900 hover:bg-slate-850 text-indigo-400 text-[10px] font-semibold rounded-lg transition border border-slate-800"
+                  >
+                    Unlock API Keys
+                  </button>
+                </div>
+              )}
 
-              <div className="p-5 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-3">
-                <div className="flex justify-between items-center text-xs text-gray-400">
-                  <span>AI Credits remaining</span>
-                  <Sparkles className="w-4 h-4 text-purple-400" />
+              {subscription && subscription.planName !== "Free" ? (
+                <div className="p-5 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-3">
+                  <div className="flex justify-between items-center text-xs text-gray-400">
+                    <span>AI Credits remaining</span>
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <div className="text-2xl font-bold text-white">
+                    {subscription.creditsTotal - subscription.creditsUsed} <span className="text-xs text-gray-500 font-normal">of {subscription.creditsTotal}</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500" style={{ width: `${((subscription.creditsTotal - subscription.creditsUsed) / subscription.creditsTotal) * 100}%` }}></div>
+                  </div>
+                  <div className="text-[10px] text-gray-500">Resetting on {subscription.nextBillingDate}</div>
                 </div>
-                {subscription && (
-                  <>
-                    <div className="text-2xl font-bold text-white">
-                      {subscription.creditsTotal - subscription.creditsUsed} <span className="text-xs text-gray-500 font-normal">of {subscription.creditsTotal}</span>
+              ) : (
+                <div className="p-5 rounded-2xl border border-slate-800/80 bg-[#0e1424]/40 space-y-3 relative overflow-hidden group flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center text-xs text-gray-400">
+                      <span>AI Credits remaining</span>
+                      <Lock className="w-4 h-4 text-gray-500" />
                     </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500" style={{ width: `${(subscription.creditsUsed / subscription.creditsTotal) * 100}%` }}></div>
-                    </div>
-                    <div className="text-[10px] text-gray-500">Resetting on {subscription.nextBillingDate}</div>
-                  </>
-                )}
-              </div>
+                    <div className="text-lg font-bold text-gray-600 mt-2 filter blur-[1.5px]">0 credits remaining</div>
+                    <div className="text-[10px] text-gray-500 mt-1">Professional / Enterprise Feature</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCurrentTab("billing");
+                      triggerToast("Upgrade to Professional to unlock Gemini AI features!", "info");
+                    }}
+                    className="w-full py-1.5 bg-slate-900 hover:bg-slate-855 text-purple-400 text-[10px] font-semibold rounded-lg transition border border-slate-800"
+                  >
+                    Unlock AI Workspace
+                  </button>
+                </div>
+              )}
 
               <div className="p-5 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-3">
                 <div className="flex justify-between items-center text-xs text-gray-400">
@@ -1623,7 +1721,51 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 </div>
 
                 {/* Core Interactive stage */}
-                <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424]/40 space-y-6">
+                {subscription?.planName === "Free" && !["merge", "split", "compress"].includes(activeToolId) ? (
+                  <div className="p-8 rounded-2xl border border-dashed border-indigo-500/30 bg-[#0e1424] text-center space-y-6">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto animate-pulse">
+                      <Lock className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-2">
+                      <h2 className="text-xl font-display font-bold text-white flex items-center justify-center gap-2">
+                        Professional Toolkit Required
+                      </h2>
+                      <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
+                        The <span className="text-indigo-300 font-mono font-bold">"{PDF_TOOLS.find(t => t.id === activeToolId)?.name}"</span> tool is a premium feature exclusive to Professional and Enterprise members.
+                      </p>
+                    </div>
+
+                    <div className="max-w-xs mx-auto p-4 rounded-xl border border-slate-800 bg-slate-950/40 text-left space-y-2">
+                      <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Unlimited runs on all 15+ PDF tools</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Advanced Gemini 3.5 AI Document Workspace</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Heavy file compiler streams (up to 2 GB)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-300">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Secure cryptographic signatures & forms</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setCurrentTab("billing");
+                        triggerToast("Upgrading unlocks all premium PDF tools instantly!", "info");
+                      }}
+                      className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl text-xs font-semibold shadow transition mx-auto"
+                    >
+                      Upgrade to Professional for $15/mo
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424]/40 space-y-6">
                   
                   {/* File Upload Zone - Supports multi-file for merge, single otherwise */}
                   {activeToolId !== "convert-md" && (
@@ -1955,6 +2097,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   </div>
 
                 </div>
+                )}
 
               </div>
             </div>
@@ -1965,9 +2108,66 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             TAB: AI WORKSPACE
             ======================================================= */}
         {authToken && currentTab === "ai-workspace" && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-            
-            <div className="border-b border-slate-800/80 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+            {subscription?.planName === "Free" ? (
+              <div className="p-12 rounded-2xl border border-dashed border-indigo-500/30 bg-[#0e1424] text-center space-y-8 max-w-4xl mx-auto">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto animate-pulse">
+                  <Sparkles className="w-8 h-8" />
+                </div>
+                
+                <div className="space-y-3">
+                  <h1 className="text-3xl font-display font-extrabold text-white">DocuMind AI Workspace</h1>
+                  <p className="text-sm text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                    Connect deep semantic audits, translation tables, redline suggestions, and conversational queries powered by Gemini 3.5.
+                  </p>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-4 max-w-2xl mx-auto text-left">
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Executive Summaries</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">Condense massive contracts, legal transcripts, or resumes into core actions in seconds.</p>
+                  </div>
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Contract Auditing</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">Automatically extract liabilities, risk ratings, missing standard clauses, and suggestions.</p>
+                  </div>
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Conversational PDF Chat</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">Talk directly to your documents. Ask questions, build outlines, and translate segments easily.</p>
+                  </div>
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40 space-y-1">
+                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Resume Coaching Suite</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">Cross-audit qualifications directly against custom JD criteria for optimal hiring profiles.</p>
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    onClick={() => {
+                      setCurrentTab("billing");
+                      triggerToast("Upgrade to Professional to unlock the AI Workspace instantly!", "info");
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl text-xs font-semibold shadow-lg transition mx-auto"
+                  >
+                    Upgrade to Professional for $15/mo
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <div className="border-b border-slate-800/80 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl sm:text-4xl font-display font-extrabold text-white flex items-center gap-2">
                   <Sparkles className="w-8 h-8 text-indigo-400" /> DocuMind AI Workspace
@@ -2216,6 +2416,8 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             </div>
 
           </div>
+          )}
+          </div>
         )}
 
         {/* =======================================================
@@ -2408,41 +2610,61 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   </h2>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newKeyName}
-                      onChange={(e) => setNewKeyName(e.target.value)}
-                      placeholder="e.g. My Website API Key"
-                      className="flex-grow px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
-                    />
+                {subscription?.planName !== "Enterprise" ? (
+                  <div className="text-center py-6 space-y-4">
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 text-gray-500 flex items-center justify-center mx-auto">
+                      <Lock className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-xs font-bold text-white">Enterprise Token Generator</h3>
+                      <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
+                        Dedicated developer REST API Key access is available exclusively on our Enterprise tier.
+                      </p>
+                    </div>
                     <button
-                      onClick={handleAddAPIKey}
-                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl"
+                      onClick={() => handleUpgradePlan("Enterprise")}
+                      className="py-1.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-[10px] rounded-lg transition"
                     >
-                      Issue Token
+                      Upgrade to Enterprise
                     </button>
                   </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newKeyName}
+                        onChange={(e) => setNewKeyName(e.target.value)}
+                        placeholder="e.g. My Website API Key"
+                        className="flex-grow px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                      />
+                      <button
+                        onClick={handleAddAPIKey}
+                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl"
+                      >
+                        Issue Token
+                      </button>
+                    </div>
 
-                  <div className="space-y-2 max-h-[160px] overflow-y-auto">
-                    {apiKeys.length === 0 ? (
-                      <p className="text-[10px] text-gray-500 italic">No developer tokens active. Create one above.</p>
-                    ) : (
-                      apiKeys.map((k) => (
-                        <div key={k.id} className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
-                          <div>
-                            <span className="font-semibold text-white block">{k.name}</span>
-                            <span className="text-[9px] font-mono text-gray-500">{k.prefix} • Issued {k.createdAt}</span>
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto">
+                      {apiKeys.length === 0 ? (
+                        <p className="text-[10px] text-gray-500 italic">No developer tokens active. Create one above.</p>
+                      ) : (
+                        apiKeys.map((k) => (
+                          <div key={k.id} className="p-2.5 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
+                            <div>
+                              <span className="font-semibold text-white block">{k.name}</span>
+                              <span className="text-[9px] font-mono text-gray-500">{k.prefix} • Issued {k.createdAt}</span>
+                            </div>
+                            <button onClick={() => handleDeleteAPIKey(k.id)} className="text-gray-500 hover:text-rose-400">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                          <button onClick={() => handleDeleteAPIKey(k.id)} className="text-gray-500 hover:text-rose-400">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))
-                    )}
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
             </div>
@@ -2759,7 +2981,55 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             ======================================================= */}
         {authToken && currentTab === "documentation" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-            <div className="grid lg:grid-cols-4 gap-8">
+            {subscription?.planName !== "Enterprise" ? (
+              <div className="p-12 rounded-2xl border border-dashed border-slate-800 bg-[#0e1424] text-center space-y-8 max-w-4xl mx-auto">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto animate-pulse">
+                  <Key className="w-8 h-8" />
+                </div>
+                
+                <div className="space-y-3">
+                  <h1 className="text-3xl font-display font-extrabold text-white">Developer API Reference</h1>
+                  <p className="text-sm text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                    Integrate high-speed PDF rendering, custom OCR engines, cryptographic encryption, and metadata scrubbing directly into your web/mobile applications.
+                  </p>
+                </div>
+
+                <div className="max-w-md mx-auto p-5 rounded-xl border border-slate-800 bg-slate-950/40 text-left space-y-3">
+                  <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Enterprise Developer Benefits:</div>
+                  <ul className="space-y-2 text-[11px] text-gray-400">
+                    <li className="flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                      <span>Dedicated REST API endpoint tokens (`ap_live_dev_*`)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                      <span>Support for up to 5,000 monthly API document operations</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                      <span>Cryptographic transit validation & standard SLA guarantees</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                      <span>Complete SDK code snippets and webhook receiver integrations</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    onClick={() => {
+                      setCurrentTab("billing");
+                      triggerToast("Upgrade to Enterprise to generate developer keys instantly!", "info");
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl text-xs font-semibold shadow-lg transition mx-auto"
+                  >
+                    Upgrade to Enterprise
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid lg:grid-cols-4 gap-8">
               
               {/* Docs directory list */}
               <div className="space-y-4">
@@ -2790,6 +3060,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
               </div>
 
             </div>
+            )}
           </div>
         )}
 

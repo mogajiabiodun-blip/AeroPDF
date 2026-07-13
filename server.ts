@@ -150,6 +150,28 @@ function getAuthenticatedUser(req: express.Request, res: express.Response, next:
   next();
 }
 
+function requirePremium(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized access. Please register or log in first." });
+  }
+  if (user.subscription.planName === "Free") {
+    return res.status(403).json({ error: "AeroPDF AI Workspace is a premium feature. Please upgrade to Professional or Enterprise to unlock real-time Gemini analysis." });
+  }
+  next();
+}
+
+function requireEnterprise(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ error: "Unauthorized access. Please register or log in first." });
+  }
+  if (user.subscription.planName !== "Enterprise") {
+    return res.status(403).json({ error: "Developer APIs are exclusive to Enterprise subscribers." });
+  }
+  next();
+}
+
 // Lazy initialization of Gemini client
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
@@ -434,7 +456,7 @@ async function startServer() {
   });
 
   // Add virtual API Key
-  app.post("/api/user/apikeys", getAuthenticatedUser, (req, res) => {
+  app.post("/api/user/apikeys", getAuthenticatedUser, requireEnterprise, (req, res) => {
     const user = (req as any).user;
     const { name } = req.body;
     const newKey = {
@@ -449,7 +471,7 @@ async function startServer() {
   });
 
   // Delete virtual API Key
-  app.delete("/api/user/apikeys/:id", getAuthenticatedUser, (req, res) => {
+  app.delete("/api/user/apikeys/:id", getAuthenticatedUser, requireEnterprise, (req, res) => {
     const user = (req as any).user;
     const { id } = req.params;
     user.apiKeys = user.apiKeys.filter((k: any) => k.id !== id);
@@ -466,6 +488,42 @@ async function startServer() {
   app.post("/api/documents/upload", getAuthenticatedUser, (req, res) => {
     const user = (req as any).user;
     const { name, size, category } = req.body;
+
+    // Check file size and vault storage limits based on active plan
+    if (user.subscription.planName === "Free") {
+      if (size && size.includes("MB")) {
+        const val = parseFloat(size.replace("MB", "").trim());
+        if (val > 10) {
+          return res.status(403).json({ error: "File limit exceeded. Free tier accounts are restricted to 10 MB per file. Please upgrade to Professional." });
+        }
+      }
+      
+      let totalMB = 0;
+      user.documents.forEach((d: any) => {
+        if (d.size.includes("MB")) {
+          totalMB += parseFloat(d.size.replace("MB", "").trim());
+        } else if (d.size.includes("KB")) {
+          totalMB += parseFloat(d.size.replace("KB", "").trim()) / 1024;
+        }
+      });
+      
+      if (totalMB > 100) {
+        return res.status(403).json({ error: "Vault space exhausted. Free tier accounts have a 100 MB total storage limit. Please upgrade to Professional." });
+      }
+    } else if (user.subscription.planName === "Professional") {
+      if (size && size.includes("GB")) {
+        const val = parseFloat(size.replace("GB", "").trim());
+        if (val > 2) {
+          return res.status(403).json({ error: "File limit exceeded. Professional tier accounts are restricted to 2 GB per file." });
+        }
+      } else if (size && size.includes("MB")) {
+        const val = parseFloat(size.replace("MB", "").trim());
+        if (val > 2048) {
+          return res.status(403).json({ error: "File limit exceeded. Professional tier accounts are restricted to 2 GB per file." });
+        }
+      }
+    }
+
     const newDoc: Document = {
       id: "doc-" + Date.now(),
       name: name || "unnamed.pdf",
@@ -491,6 +549,32 @@ async function startServer() {
     saveDatabase();
 
     res.json(newDoc);
+  });
+
+  // Record PDF tool operation & deduct credits
+  app.post("/api/billing/record-operation", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    const { toolName } = req.body;
+    
+    // Validate that credits are available
+    if (user.subscription.creditsUsed >= user.subscription.creditsTotal) {
+      return res.status(403).json({ error: `You have consumed all of your active plan credits (${user.subscription.creditsTotal}). Please upgrade to Professional or Enterprise in the Billing panel!` });
+    }
+    
+    user.subscription.creditsUsed += 1;
+    
+    // Log activity
+    user.activityLogs.unshift({
+      id: "act-" + Date.now(),
+      userId: user.id,
+      action: "PDF Operation",
+      details: `Executed ${toolName || "PDF Tool"} successfully`,
+      timestamp: new Date().toISOString(),
+      status: "success"
+    });
+    
+    saveDatabase();
+    res.json({ success: true, subscription: user.subscription });
   });
 
   app.post("/api/documents/toggle-favorite", getAuthenticatedUser, (req, res) => {
@@ -580,7 +664,7 @@ async function startServer() {
 
   // --- GEMINI AI CHAT & DOCUMENT WORKSPACE ENDPOINTS ---
 
-  app.post("/api/ai/summarize", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/summarize", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No text content provided for summarization" });
@@ -615,7 +699,7 @@ ${text.slice(0, 50000)}
     }
   });
 
-  app.post("/api/ai/explain", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/explain", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { term, context } = req.body;
     if (!term) {
       return res.status(400).json({ error: "No term or text provided to explain" });
@@ -648,7 +732,7 @@ Provide:
     }
   });
 
-  app.post("/api/ai/contract-review", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/contract-review", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No contract text provided for review" });
@@ -692,7 +776,7 @@ ${text.slice(0, 50000)}
     }
   });
 
-  app.post("/api/ai/resume-analysis", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/resume-analysis", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { text, jobDescription } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No resume text provided" });
@@ -737,7 +821,7 @@ ${text.slice(0, 30000)}
     }
   });
 
-  app.post("/api/ai/chat", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/chat", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { messages, documentText, docName } = req.body;
     if (!messages || messages.length === 0) {
       return res.status(400).json({ error: "No message conversation history supplied" });
@@ -779,7 +863,7 @@ How would you like to edit your document next? Let me know!`
     }
   });
 
-  app.post("/api/ai/redact-suggestions", getAuthenticatedUser, async (req, res) => {
+  app.post("/api/ai/redact-suggestions", getAuthenticatedUser, requirePremium, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No text provided for redaction inspection" });
