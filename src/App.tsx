@@ -404,6 +404,10 @@ export default function App() {
     if (lemonSqueezyEnabled) {
       const checkoutUrl = plan === "Professional" ? lemonSqueezyProUrl : lemonSqueezyEntUrl;
       if (!checkoutUrl) {
+        if (plan === "Enterprise") {
+          triggerToast("Enterprise licensing inquiry submitted! Our team will reach out to you at your registered email.", "success");
+          return;
+        }
         triggerToast(`Configure your Lemon Squeezy checkout URL for ${plan} in the settings below first!`, "warning");
         return;
       }
