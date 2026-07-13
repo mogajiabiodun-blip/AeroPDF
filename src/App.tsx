@@ -455,7 +455,14 @@ export default function App() {
         triggerToast("Lemon Squeezy integration settings saved", "success");
         loadDatabaseContext();
       } else {
-        triggerToast("Failed to save settings", "error");
+        let errMsg = "Failed to save settings";
+        try {
+          const data = await res.json();
+          if (data && data.error) {
+            errMsg = data.error;
+          }
+        } catch (e) {}
+        triggerToast(errMsg, "error");
       }
     } catch (err) {
       triggerToast("Network error saving settings", "error");
