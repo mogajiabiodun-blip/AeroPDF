@@ -58,10 +58,34 @@ import {
   downloadBlob
 } from "./pdfEngine";
 
+// Safe API fetch helper that automatically appends the Authorization bearer token
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("aeropdf_token") : null;
+  const headers = {
+    ...(init?.headers || {}),
+  } as Record<string, string>;
+  if (token && input.startsWith("/api/")) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return fetch(input, {
+    ...init,
+    headers
+  });
+}
+
 export default function App() {
   // Navigation State
   const [currentTab, setCurrentTab] = useState<TabType>("landing");
   const [activeToolId, setActiveToolId] = useState<PDFToolId>("merge");
+  
+  // User Authentication State
+  const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem("aeropdf_token"));
+  const [currentUser, setCurrentUser] = useState<{ id: string; username: string; email: string } | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   
   // Database States
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
@@ -132,13 +156,96 @@ export default function App() {
     }
   }, [toast]);
 
+  // Check session status
+  const checkSession = async () => {
+    const token = localStorage.getItem("aeropdf_token");
+    if (!token) {
+      setCurrentUser(null);
+      setAuthToken(null);
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/auth/me", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentUser(data.user);
+        setAuthToken(token);
+        // Load data context
+        await loadDatabaseContext();
+      } else {
+        handleLogout();
+      }
+    } catch (err) {
+      console.error("Failed to check session", err);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("aeropdf_token");
+    setAuthToken(null);
+    setCurrentUser(null);
+    setDocuments([]);
+    setActivityLogs([]);
+    setSubscription(null);
+    setInvoices([]);
+    setApiKeys([]);
+    triggerToast("Logged out successfully!", "info");
+    setCurrentTab("landing");
+  };
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authUsername || !authPassword || (authMode === "register" && !authEmail)) {
+      triggerToast("Please fill in all required fields", "warning");
+      return;
+    }
+
+    setIsAuthLoading(true);
+    try {
+      const url = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const payload = authMode === "login" 
+        ? { username: authUsername, password: authPassword }
+        : { username: authUsername, password: authPassword, email: authEmail };
+
+      const res = await apiFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        localStorage.setItem("aeropdf_token", data.token);
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        triggerToast(authMode === "login" ? `Welcome back, ${data.user.username}!` : "Registration successful!", "success");
+        setAuthUsername("");
+        setAuthPassword("");
+        setAuthEmail("");
+        // Load user's data context
+        await loadDatabaseContext();
+        setCurrentTab("dashboard");
+      } else {
+        triggerToast(data.error || "Authentication failed", "error");
+      }
+    } catch (err) {
+      triggerToast("Network connection issue. Please check Render backend.", "error");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
   // Load Database Context from Server
   const loadDatabaseContext = async () => {
+    const token = localStorage.getItem("aeropdf_token");
+    if (!token) return;
     try {
       const [docRes, subRes, logsRes] = await Promise.all([
-        fetch("/api/documents"),
-        fetch("/api/user/subscription"),
-        fetch("/api/logs")
+        apiFetch("/api/documents"),
+        apiFetch("/api/user/subscription"),
+        apiFetch("/api/logs")
       ]);
       if (docRes.ok) setDocuments(await docRes.json());
       if (subRes.ok) {
@@ -155,7 +262,7 @@ export default function App() {
 
   const loadAdminStats = async () => {
     try {
-      const res = await fetch("/api/admin/stats");
+      const res = await apiFetch("/api/admin/stats");
       if (res.ok) setAdminStats(await res.json());
     } catch (err) {
       console.error("Failed to load admin stats", err);
@@ -163,7 +270,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadDatabaseContext();
+    checkSession();
   }, []);
 
   useEffect(() => {
@@ -190,7 +297,7 @@ export default function App() {
       : (file.size / 1024).toFixed(0) + " KB";
 
     try {
-      const res = await fetch("/api/documents/upload", {
+      const res = await apiFetch("/api/documents/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -214,7 +321,7 @@ export default function App() {
   // Toggle favorite / shared statuses
   const toggleFavorite = async (id: string) => {
     try {
-      const res = await fetch("/api/documents/toggle-favorite", {
+      const res = await apiFetch("/api/documents/toggle-favorite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
@@ -230,7 +337,7 @@ export default function App() {
 
   const toggleShare = async (id: string) => {
     try {
-      const res = await fetch("/api/documents/toggle-share", {
+      const res = await apiFetch("/api/documents/toggle-share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
@@ -248,7 +355,7 @@ export default function App() {
   // Delete document
   const deleteDocument = async (id: string) => {
     try {
-      const res = await fetch(`/api/documents/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/documents/${id}`, { method: "DELETE" });
       if (res.ok) {
         triggerToast("Document purged from servers", "warning");
         loadDatabaseContext();
@@ -265,7 +372,7 @@ export default function App() {
   // Subscribe plan
   const handleUpgradePlan = async (plan: "Free" | "Professional" | "Enterprise") => {
     try {
-      const res = await fetch("/api/billing/update-plan", {
+      const res = await apiFetch("/api/billing/update-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan, cycle: "monthly" })
@@ -283,7 +390,7 @@ export default function App() {
   const handleAddAPIKey = async () => {
     if (!newKeyName.trim()) return;
     try {
-      const res = await fetch("/api/user/apikeys", {
+      const res = await apiFetch("/api/user/apikeys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newKeyName })
@@ -300,7 +407,7 @@ export default function App() {
 
   const handleDeleteAPIKey = async (id: string) => {
     try {
-      const res = await fetch(`/api/user/apikeys/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/user/apikeys/${id}`, { method: "DELETE" });
       if (res.ok) {
         triggerToast("API Key deactivated", "warning");
         loadDatabaseContext();
@@ -469,7 +576,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     setIsAiLoading(true);
     setAiSummary("");
     try {
-      const res = await fetch("/api/ai/summarize", {
+      const res = await apiFetch("/api/ai/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiDocText, docName: documents.find(d => d.id === aiSelectedDocId)?.name })
@@ -487,7 +594,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
   const handleAIExplain = async (term: string) => {
     setIsAiLoading(true);
     try {
-      const res = await fetch("/api/ai/explain", {
+      const res = await apiFetch("/api/ai/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ term, context: aiDocText })
@@ -510,7 +617,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     setIsAiLoading(true);
     setAiContractReview("");
     try {
-      const res = await fetch("/api/ai/contract-review", {
+      const res = await apiFetch("/api/ai/contract-review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiDocText, docName: documents.find(d => d.id === aiSelectedDocId)?.name })
@@ -533,7 +640,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     setIsAiLoading(true);
     setAiResumeAnalysis("");
     try {
-      const res = await fetch("/api/ai/resume-analysis", {
+      const res = await apiFetch("/api/ai/resume-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiDocText })
@@ -556,7 +663,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     setIsAiLoading(true);
     setAiRedactions("");
     try {
-      const res = await fetch("/api/ai/redact-suggestions", {
+      const res = await apiFetch("/api/ai/redact-suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiDocText })
@@ -584,7 +691,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     setIsAiLoading(true);
 
     try {
-      const res = await fetch("/api/ai/chat", {
+      const res = await apiFetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -769,25 +876,50 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             </button>
           </nav>
 
-          {/* Quick Stats Right panel badge */}
-          <div className="hidden sm:flex items-center gap-3">
-            {subscription && (
-              <div className="text-right">
-                <div className="flex items-center gap-1 justify-end">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs font-bold text-gray-300">{subscription.planName} Tier</span>
+          {/* Quick Stats Right panel badge / Auth State */}
+          <div className="hidden sm:flex items-center gap-4">
+            {authToken && currentUser ? (
+              <>
+                <div className="text-right">
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="text-xs font-bold text-gray-200">{currentUser.username}</span>
+                  </div>
+                  {subscription && (
+                    <span className="text-[10px] font-mono text-indigo-400 block uppercase tracking-wider">
+                      {subscription.planName} Tier ({subscription.creditsTotal - subscription.creditsUsed} credits left)
+                    </span>
+                  )}
                 </div>
-                <span className="text-[10px] font-mono text-gray-500 block">
-                  {subscription.creditsUsed}/{subscription.creditsTotal} credits remaining
-                </span>
-              </div>
+                <button
+                  onClick={handleLogout}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-gray-300 border border-slate-700/60 transition cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setAuthMode("login");
+                    setCurrentTab("dashboard");
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white transition cursor-pointer"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => {
+                    setAuthMode("register");
+                    setCurrentTab("dashboard");
+                  }}
+                  className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:opacity-95 shadow-md transition cursor-pointer"
+                >
+                  Get Started
+                </button>
+              </>
             )}
-            <button
-              onClick={() => handleUpgradePlan("Professional")}
-              className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 shadow-md transition"
-            >
-              Upgrade
-            </button>
           </div>
 
           {/* Mobile hamburger menu */}
@@ -841,6 +973,99 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
       {/* Main Body */}
       <main className="flex-grow">
         
+        {/* =======================================================
+            USER AUTHENTICATION INTERCEPT / GATEWAY
+            ======================================================= */}
+        {!authToken && currentTab !== "landing" && (
+          <div className="max-w-md mx-auto px-4 py-16 sm:py-24">
+            <div className="p-8 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6 shadow-2xl relative overflow-hidden">
+              {/* Subtle visual glow accent */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="text-center space-y-2 relative z-10">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white flex items-center justify-center mx-auto shadow-lg mb-4">
+                  {authMode === "login" ? <Lock className="w-6 h-6" /> : <Shield className="w-6 h-6" />}
+                </div>
+                <h2 className="text-2xl font-display font-bold text-white">
+                  {authMode === "login" ? "Welcome back" : "Create your account"}
+                </h2>
+                <p className="text-xs text-gray-400">
+                  {authMode === "login" 
+                    ? "Enter your credentials to access your secure PDF cockpit" 
+                    : "Register to get 50 monthly credits and secure cloud vaults"}
+                </p>
+              </div>
+
+              <form onSubmit={handleAuthSubmit} className="space-y-4 relative z-10">
+                {authMode === "register" && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Email Address</label>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="e.g. you@company.com"
+                      required
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Username</label>
+                  <input
+                    type="text"
+                    value={authUsername}
+                    onChange={(e) => setAuthUsername(e.target.value)}
+                    placeholder="Enter your username"
+                    required
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Password</label>
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isAuthLoading}
+                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white py-3 rounded-xl text-xs font-bold shadow-lg transition duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isAuthLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>{authMode === "login" ? "Sign In" : "Register and Continue"}</span>
+                  )}
+                </button>
+              </form>
+
+              <div className="text-center pt-2 text-xs relative z-10 border-t border-slate-800/60">
+                <span className="text-gray-500">
+                  {authMode === "login" ? "Don't have an account yet?" : "Already registered?"}
+                </span>{" "}
+                <button
+                  onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
+                  className="text-indigo-400 hover:text-indigo-300 font-semibold hover:underline font-mono"
+                >
+                  {authMode === "login" ? "Create an Account" : "Log In"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* =======================================================
             TAB: LANDING PAGE
             ======================================================= */}
@@ -1032,7 +1257,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: USER DASHBOARD
             ======================================================= */}
-        {currentTab === "dashboard" && (
+        {authToken && currentTab === "dashboard" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
             
             {/* Header greeting */}
@@ -1212,7 +1437,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: PDF TOOLKIT
             ======================================================= */}
-        {currentTab === "toolkit" && (
+        {authToken && currentTab === "toolkit" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
             <div className="grid lg:grid-cols-4 gap-8">
               
@@ -1612,7 +1837,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: AI WORKSPACE
             ======================================================= */}
-        {currentTab === "ai-workspace" && (
+        {authToken && currentTab === "ai-workspace" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
             
             <div className="border-b border-slate-800/80 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1869,7 +2094,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: CLOUD DOCUMENTS VAULT
             ======================================================= */}
-        {currentTab === "documents" && (
+        {authToken && currentTab === "documents" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
             
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
@@ -2003,7 +2228,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: BILLING & DEVS CREDENTIALS
             ======================================================= */}
-        {currentTab === "billing" && (
+        {authToken && currentTab === "billing" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
             
             {/* Upper billing widgets */}
@@ -2136,7 +2361,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: SUPER ADMIN PANEL
             ======================================================= */}
-        {currentTab === "admin" && (
+        {authToken && currentTab === "admin" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
             
             <div className="border-b border-slate-800 pb-4">
@@ -2266,7 +2491,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: DEVELOPER DOCUMENTATION
             ======================================================= */}
-        {currentTab === "documentation" && (
+        {authToken && currentTab === "documentation" && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
             <div className="grid lg:grid-cols-4 gap-8">
               
@@ -2305,7 +2530,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         {/* =======================================================
             TAB: SUPPORT CHAT / HELP
             ======================================================= */}
-        {currentTab === "support" && (
+        {authToken && currentTab === "support" && (
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
             
             <div className="border-b border-slate-800 pb-4 text-center">

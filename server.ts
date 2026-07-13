@@ -44,40 +44,107 @@ interface Subscription {
   storageTotal: number; // in MB
 }
 
-// Global In-Memory Store
-let documents: Document[] = [
-  { id: "doc-1", name: "Sample_Financial_Statement.pdf", size: "1.2 MB", type: "pdf", createdAt: "2026-07-01T10:00:00Z", category: "Finance", favorite: true, shared: false, version: 1 },
-  { id: "doc-2", name: "Employment_Agreement_Template.pdf", size: "450 KB", type: "pdf", createdAt: "2026-07-05T14:30:00Z", category: "Legal", favorite: false, shared: true, version: 2 },
-  { id: "doc-3", name: "Marketing_Presentation_Q3.pdf", size: "3.8 MB", type: "pdf", createdAt: "2026-07-10T09:15:00Z", category: "Marketing", favorite: true, shared: true, version: 1 }
-];
+interface APIKey {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+}
 
-let activityLogs: ActivityLog[] = [
-  { id: "act-1", userId: "user-1", action: "User Login", details: "Logged in from Chrome on macOS (IP: 192.168.1.50)", timestamp: "2026-07-12T18:00:00Z", status: "success" },
-  { id: "act-2", userId: "user-1", action: "PDF Merge", details: "Merged 3 financial statements into a single PDF", timestamp: "2026-07-12T18:10:00Z", status: "success" },
-  { id: "act-3", userId: "user-1", action: "AI Summarization", details: "Summarized Marketing_Presentation_Q3.pdf using Gemini", timestamp: "2026-07-12T18:12:00Z", status: "success" }
-];
+interface User {
+  id: string;
+  username: string;
+  passwordHash: string;
+  email: string;
+  createdAt: string;
+  subscription: Subscription;
+  documents: Document[];
+  activityLogs: ActivityLog[];
+  invoices: Invoice[];
+  apiKeys: APIKey[];
+}
 
-let invoices: Invoice[] = [
-  { id: "INV-2026-001", date: "2026-07-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" },
-  { id: "INV-2026-002", date: "2026-06-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" },
-  { id: "INV-2026-003", date: "2026-05-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" }
-];
+// Global Multi-User Database File Store
+const DB_PATH = path.join(process.cwd(), "database.json");
+let dbData: { users: User[] } = { users: [] };
 
-let subscription: Subscription = {
-  planName: "Professional",
-  status: "active",
-  billingCycle: "monthly",
-  nextBillingDate: "2026-08-01",
-  creditsUsed: 124,
-  creditsTotal: 500,
-  storageUsed: 5.45,
-  storageTotal: 10000 // 10GB
-};
+function loadDatabase() {
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const content = fs.readFileSync(DB_PATH, "utf-8");
+      dbData = JSON.parse(content);
+      console.log(`Database loaded successfully with ${dbData.users.length} users.`);
+    } else {
+      console.log("No database file found. Initializing with default admin...");
+      const defaultUser: User = {
+        id: "user-default",
+        username: "admin",
+        passwordHash: "password",
+        email: "admin@aeropdf.com",
+        createdAt: new Date().toISOString(),
+        subscription: {
+          planName: "Professional",
+          status: "active",
+          billingCycle: "monthly",
+          nextBillingDate: "2026-08-01",
+          creditsUsed: 124,
+          creditsTotal: 500,
+          storageUsed: 5.45,
+          storageTotal: 10000
+        },
+        documents: [
+          { id: "doc-1", name: "Sample_Financial_Statement.pdf", size: "1.2 MB", type: "pdf", createdAt: "2026-07-01T10:00:00Z", category: "Finance", favorite: true, shared: false, version: 1 },
+          { id: "doc-2", name: "Employment_Agreement_Template.pdf", size: "450 KB", type: "pdf", createdAt: "2026-07-05T14:30:00Z", category: "Legal", favorite: false, shared: true, version: 2 },
+          { id: "doc-3", name: "Marketing_Presentation_Q3.pdf", size: "3.8 MB", type: "pdf", createdAt: "2026-07-10T09:15:00Z", category: "Marketing", favorite: true, shared: true, version: 1 }
+        ],
+        activityLogs: [
+          { id: "act-1", userId: "user-default", action: "User Login", details: "Logged in from Chrome on macOS (IP: 192.168.1.50)", timestamp: "2026-07-12T18:00:00Z", status: "success" },
+          { id: "act-2", userId: "user-default", action: "PDF Merge", details: "Merged 3 financial statements into a single PDF", timestamp: "2026-07-12T18:10:00Z", status: "success" },
+          { id: "act-3", userId: "user-default", action: "AI Summarization", details: "Summarized Marketing_Presentation_Q3.pdf using Gemini", timestamp: "2026-07-12T18:12:00Z", status: "success" }
+        ],
+        invoices: [
+          { id: "INV-2026-001", date: "2026-07-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" },
+          { id: "INV-2026-002", date: "2026-06-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" },
+          { id: "INV-2026-003", date: "2026-05-01", amount: "$15.00", status: "Paid", plan: "Professional Monthly" }
+        ],
+        apiKeys: [
+          { id: "key-1", name: "Production API Key", prefix: "ap_live_...", createdAt: "2026-06-15" },
+          { id: "key-2", name: "Staging API Key", prefix: "ap_test_...", createdAt: "2026-07-01" }
+        ]
+      };
+      dbData.users.push(defaultUser);
+      saveDatabase();
+    }
+  } catch (err) {
+    console.error("Failed to load or initialize database:", err);
+  }
+}
 
-let apiKeys = [
-  { id: "key-1", name: "Production API Key", prefix: "ap_live_...", createdAt: "2026-06-15" },
-  { id: "key-2", name: "Staging API Key", prefix: "ap_test_...", createdAt: "2026-07-01" }
-];
+function saveDatabase() {
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(dbData, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Failed to save database:", err);
+  }
+}
+
+// Boot database
+loadDatabase();
+
+// Authentication Middleware
+function getAuthenticatedUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized access. Please register or log in first." });
+  }
+  const userId = authHeader.substring(7); // "Bearer <userId>"
+  const user = dbData.users.find(u => u.id === userId);
+  if (!user) {
+    return res.status(401).json({ error: "Session invalid or expired. Please register or log in again." });
+  }
+  (req as any).user = user;
+  next();
+}
 
 // Lazy initialization of Gemini client
 let aiClient: GoogleGenAI | null = null;
@@ -118,28 +185,146 @@ async function startServer() {
     });
   });
 
-  // System statistics (for super admin / dashboard)
-  app.get("/api/admin/stats", (req, res) => {
+  // --- AUTHENTICATION ENDPOINTS ---
+
+  // Register a new user
+  app.post("/api/auth/register", (req, res) => {
+    const { username, password, email } = req.body;
+    if (!username || !password || !email) {
+      return res.status(400).json({ error: "Username, email, and password are required." });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingUser = dbData.users.find(u => u.username.toLowerCase() === normalizedUsername || u.email.toLowerCase() === normalizedEmail);
+    if (existingUser) {
+      return res.status(400).json({ error: "Username or Email already registered." });
+    }
+
+    const userId = "user-" + Date.now();
+    const newUser: User = {
+      id: userId,
+      username: username.trim(),
+      passwordHash: password, // Store password simply for this demo context
+      email: normalizedEmail,
+      createdAt: new Date().toISOString(),
+      subscription: {
+        planName: "Free",
+        status: "active",
+        billingCycle: "monthly",
+        nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        creditsUsed: 0,
+        creditsTotal: 50,
+        storageUsed: 0,
+        storageTotal: 100
+      },
+      documents: [
+        { id: "doc-welcome", name: "Welcome_to_AeroPDF.pdf", size: "12 KB", type: "pdf", createdAt: new Date().toISOString(), category: "General", favorite: true, shared: false, version: 1 }
+      ],
+      activityLogs: [
+        { id: "act-" + Date.now(), userId: userId, action: "Account Registered", details: "Created new AeroPDF free account", timestamp: new Date().toISOString(), status: "success" }
+      ],
+      invoices: [],
+      apiKeys: []
+    };
+
+    dbData.users.push(newUser);
+    saveDatabase();
+
     res.json({
-      totalUsers: 14205,
-      activeSubscriptions: 2840,
-      monthlyRevenue: "$42,600",
-      totalDocumentsProcessed: 184512,
+      success: true,
+      token: userId,
+      user: {
+        id: userId,
+        username: newUser.username,
+        email: newUser.email,
+        subscription: newUser.subscription
+      }
+    });
+  });
+
+  // Login existing user
+  app.post("/api/auth/login", (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required." });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+    const user = dbData.users.find(u => u.username.toLowerCase() === normalizedUsername);
+
+    if (!user || user.passwordHash !== password) {
+      return res.status(401).json({ error: "Invalid username or password." });
+    }
+
+    // Add login log
+    user.activityLogs.unshift({
+      id: "act-" + Date.now(),
+      userId: user.id,
+      action: "User Login",
+      details: "Logged in successfully to AeroPDF",
+      timestamp: new Date().toISOString(),
+      status: "success"
+    });
+    saveDatabase();
+
+    res.json({
+      success: true,
+      token: user.id,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        subscription: user.subscription
+      }
+    });
+  });
+
+  // Get current session user
+  app.get("/api/auth/me", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        subscription: user.subscription
+      }
+    });
+  });
+
+  // System statistics (for super admin / dashboard)
+  app.get("/api/admin/stats", getAuthenticatedUser, (req, res) => {
+    const totalUsers = dbData.users.length;
+    const recentLogs = dbData.users.flatMap(u => u.activityLogs).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5);
+    res.json({
+      totalUsers: totalUsers + 14204,
+      activeSubscriptions: dbData.users.filter(u => u.subscription.planName !== "Free").length + 2840,
+      monthlyRevenue: `$${(dbData.users.filter(u => u.subscription.planName !== "Free").length * 15 + 42600).toLocaleString()}`,
+      totalDocumentsProcessed: dbData.users.reduce((acc, u) => acc + u.documents.length, 0) + 184512,
       activeJobs: 3,
       systemCpu: "12%",
       systemMemory: "42% of 4GB",
       storageUsageTotal: "24.5 TB of 100 TB",
-      recentLogs: activityLogs.slice(-5)
+      recentLogs
     });
   });
 
   // Get current subscription & stats
-  app.get("/api/user/subscription", (req, res) => {
-    res.json({ subscription, invoices, apiKeys });
+  app.get("/api/user/subscription", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    res.json({
+      subscription: user.subscription,
+      invoices: user.invoices,
+      apiKeys: user.apiKeys
+    });
   });
 
   // Add virtual API Key
-  app.post("/api/user/apikeys", (req, res) => {
+  app.post("/api/user/apikeys", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { name } = req.body;
     const newKey = {
       id: "key-" + Date.now(),
@@ -147,23 +332,28 @@ async function startServer() {
       prefix: "ap_live_dev_" + Math.random().toString(36).substring(2, 8) + "...",
       createdAt: new Date().toISOString().split("T")[0]
     };
-    apiKeys.push(newKey);
+    user.apiKeys.push(newKey);
+    saveDatabase();
     res.json(newKey);
   });
 
   // Delete virtual API Key
-  app.delete("/api/user/apikeys/:id", (req, res) => {
+  app.delete("/api/user/apikeys/:id", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { id } = req.params;
-    apiKeys = apiKeys.filter(k => k.id !== id);
+    user.apiKeys = user.apiKeys.filter((k: any) => k.id !== id);
+    saveDatabase();
     res.json({ success: true });
   });
 
   // Documents API
-  app.get("/api/documents", (req, res) => {
-    res.json(documents);
+  app.get("/api/documents", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    res.json(user.documents);
   });
 
-  app.post("/api/documents/upload", (req, res) => {
+  app.post("/api/documents/upload", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { name, size, category } = req.body;
     const newDoc: Document = {
       id: "doc-" + Date.now(),
@@ -176,57 +366,64 @@ async function startServer() {
       shared: false,
       version: 1
     };
-    documents.unshift(newDoc);
+    user.documents.unshift(newDoc);
     
     // Log Activity
-    activityLogs.unshift({
+    user.activityLogs.unshift({
       id: "act-" + Date.now(),
-      userId: "user-1",
+      userId: user.id,
       action: "Document Upload",
       details: `Uploaded ${newDoc.name}`,
       timestamp: new Date().toISOString(),
       status: "success"
     });
+    saveDatabase();
 
     res.json(newDoc);
   });
 
-  app.post("/api/documents/toggle-favorite", (req, res) => {
+  app.post("/api/documents/toggle-favorite", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { id } = req.body;
-    const doc = documents.find(d => d.id === id);
+    const doc = user.documents.find((d: any) => d.id === id);
     if (doc) {
       doc.favorite = !doc.favorite;
+      saveDatabase();
       res.json(doc);
     } else {
       res.status(404).json({ error: "Document not found" });
     }
   });
 
-  app.post("/api/documents/toggle-share", (req, res) => {
+  app.post("/api/documents/toggle-share", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { id } = req.body;
-    const doc = documents.find(d => d.id === id);
+    const doc = user.documents.find((d: any) => d.id === id);
     if (doc) {
       doc.shared = !doc.shared;
+      saveDatabase();
       res.json(doc);
     } else {
       res.status(404).json({ error: "Document not found" });
     }
   });
 
-  app.delete("/api/documents/:id", (req, res) => {
+  app.delete("/api/documents/:id", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { id } = req.params;
-    const doc = documents.find(d => d.id === id);
+    const doc = user.documents.find((d: any) => d.id === id);
     if (doc) {
-      documents = documents.filter(d => d.id !== id);
+      user.documents = user.documents.filter((d: any) => d.id !== id);
       // Log Action
-      activityLogs.unshift({
+      user.activityLogs.unshift({
         id: "act-" + Date.now(),
-        userId: "user-1",
+        userId: user.id,
         action: "Document Delete",
         details: `Deleted ${doc.name}`,
         timestamp: new Date().toISOString(),
         status: "warning"
       });
+      saveDatabase();
       res.json({ success: true });
     } else {
       res.status(404).json({ error: "Document not found" });
@@ -234,20 +431,22 @@ async function startServer() {
   });
 
   // Logs API
-  app.get("/api/logs", (req, res) => {
-    res.json(activityLogs);
+  app.get("/api/logs", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    res.json(user.activityLogs);
   });
 
   // Update virtual plan
-  app.post("/api/billing/update-plan", (req, res) => {
+  app.post("/api/billing/update-plan", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
     const { plan, cycle } = req.body;
-    subscription.planName = plan;
-    subscription.billingCycle = cycle;
-    subscription.creditsTotal = plan === "Enterprise" ? 5000 : plan === "Professional" ? 500 : 50;
-    subscription.storageTotal = plan === "Enterprise" ? 500000 : plan === "Professional" ? 10000 : 100;
-    subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    user.subscription.planName = plan;
+    user.subscription.billingCycle = cycle;
+    user.subscription.creditsTotal = plan === "Enterprise" ? 5000 : plan === "Professional" ? 500 : 50;
+    user.subscription.storageTotal = plan === "Enterprise" ? 500000 : plan === "Professional" ? 10000 : 100;
+    user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     
-    invoices.unshift({
+    user.invoices.unshift({
       id: "INV-2026-" + Math.floor(Math.random() * 900 + 100),
       date: new Date().toISOString().split("T")[0],
       amount: plan === "Enterprise" ? "$120.00" : plan === "Professional" ? "$15.00" : "$0.00",
@@ -255,21 +454,22 @@ async function startServer() {
       plan: `${plan} ${cycle === "monthly" ? "Monthly" : "Yearly"}`
     });
 
-    activityLogs.unshift({
+    user.activityLogs.unshift({
       id: "act-" + Date.now(),
-      userId: "user-1",
+      userId: user.id,
       action: "Subscription Changed",
       details: `Upgraded/Changed plan to ${plan} (${cycle})`,
       timestamp: new Date().toISOString(),
       status: "success"
     });
+    saveDatabase();
 
-    res.json({ success: true, subscription });
+    res.json({ success: true, subscription: user.subscription });
   });
 
   // --- GEMINI AI CHAT & DOCUMENT WORKSPACE ENDPOINTS ---
 
-  app.post("/api/ai/summarize", async (req, res) => {
+  app.post("/api/ai/summarize", getAuthenticatedUser, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No text content provided for summarization" });
@@ -284,7 +484,7 @@ async function startServer() {
 4. Key Terms & Definitions
 
 Document Name: ${docName || "Uploaded PDF"}
-Document Content:
+Document Context:
 ${text.slice(0, 50000)}
 `;
 
@@ -304,7 +504,7 @@ ${text.slice(0, 50000)}
     }
   });
 
-  app.post("/api/ai/explain", async (req, res) => {
+  app.post("/api/ai/explain", getAuthenticatedUser, async (req, res) => {
     const { term, context } = req.body;
     if (!term) {
       return res.status(400).json({ error: "No term or text provided to explain" });
@@ -337,7 +537,7 @@ Provide:
     }
   });
 
-  app.post("/api/ai/contract-review", async (req, res) => {
+  app.post("/api/ai/contract-review", getAuthenticatedUser, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No contract text provided for review" });
@@ -381,7 +581,7 @@ ${text.slice(0, 50000)}
     }
   });
 
-  app.post("/api/ai/resume-analysis", async (req, res) => {
+  app.post("/api/ai/resume-analysis", getAuthenticatedUser, async (req, res) => {
     const { text, jobDescription } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No resume text provided" });
@@ -426,7 +626,7 @@ ${text.slice(0, 30000)}
     }
   });
 
-  app.post("/api/ai/chat", async (req, res) => {
+  app.post("/api/ai/chat", getAuthenticatedUser, async (req, res) => {
     const { messages, documentText, docName } = req.body;
     if (!messages || messages.length === 0) {
       return res.status(400).json({ error: "No message conversation history supplied" });
@@ -468,7 +668,7 @@ How would you like to edit your document next? Let me know!`
     }
   });
 
-  app.post("/api/ai/redact-suggestions", async (req, res) => {
+  app.post("/api/ai/redact-suggestions", getAuthenticatedUser, async (req, res) => {
     const { text, docName } = req.body;
     if (!text) {
       return res.status(400).json({ error: "No text provided for redaction inspection" });
@@ -499,10 +699,10 @@ ${text.slice(0, 40000)}
 We scanned the text structure and identified standard security layers:
 
 1. **Email Address Pattern**
-   - *Found:* ` + "`mogajiabiodun@gmail.com`" + ` (User Profile Email)
-   - *Action:* Recommended Redaction (` + "`m***************@gmail.com`" + `)
+   - *Found:* \`mogajiabiodun@gmail.com\` (User Profile Email)
+   - *Action:* Recommended Redaction (\`m***************@gmail.com\`)
 2. **IP Addresses**
-   - *Found:* ` + "`192.168.1.50`" + ` in login log
+   - *Found:* \`192.168.1.50\` in login log
    - *Action:* High risk, obfuscate to standard local scopes`
       });
     }
