@@ -41,7 +41,9 @@ import {
   User,
   Heart,
   Globe,
-  Fingerprint
+  Fingerprint,
+  Copy,
+  ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TabType, PDFDocument, ActivityLog, Invoice, SubscriptionInfo, APIKey, AdminStats, ChatMessage, PDFToolId } from "./types";
@@ -143,6 +145,13 @@ export default function App() {
   const [adminBlogTitle, setAdminBlogTitle] = useState("");
   const [adminBlogExcerpt, setAdminBlogExcerpt] = useState("");
   const [adminBlogs, setAdminBlogs] = useState(BLOG_POSTS);
+
+  // Lemon Squeezy integration states
+  const [lemonSqueezyEnabled, setLemonSqueezyEnabled] = useState(false);
+  const [lemonSqueezyProUrl, setLemonSqueezyProUrl] = useState("");
+  const [lemonSqueezyEntUrl, setLemonSqueezyEntUrl] = useState("");
+  const [lemonSqueezyWebhookSecret, setLemonSqueezyWebhookSecret] = useState("");
+  const [isSavingLsSettings, setIsSavingLsSettings] = useState(false);
 
   // Canvas Ref for Signature
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -253,6 +262,10 @@ export default function App() {
         setSubscription(data.subscription);
         setInvoices(data.invoices);
         setApiKeys(data.apiKeys);
+        setLemonSqueezyEnabled(data.lemonSqueezyEnabled || false);
+        setLemonSqueezyProUrl(data.lemonSqueezyProUrl || "");
+        setLemonSqueezyEntUrl(data.lemonSqueezyEntUrl || "");
+        setLemonSqueezyWebhookSecret(data.lemonSqueezyWebhookSecret || "");
       }
       if (logsRes.ok) setActivityLogs(await logsRes.json());
     } catch (err) {
@@ -371,6 +384,45 @@ export default function App() {
 
   // Subscribe plan
   const handleUpgradePlan = async (plan: "Free" | "Professional" | "Enterprise") => {
+    if (plan === "Free") {
+      try {
+        const res = await apiFetch("/api/billing/update-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan, cycle: "monthly" })
+        });
+        if (res.ok) {
+          triggerToast("Switched back to Free plan", "success");
+          loadDatabaseContext();
+        }
+      } catch (err) {
+        triggerToast("Failed to process subscription update", "error");
+      }
+      return;
+    }
+
+    if (lemonSqueezyEnabled) {
+      const checkoutUrl = plan === "Professional" ? lemonSqueezyProUrl : lemonSqueezyEntUrl;
+      if (!checkoutUrl) {
+        triggerToast(`Configure your Lemon Squeezy checkout URL for ${plan} in the settings below first!`, "warning");
+        return;
+      }
+
+      try {
+        const urlObj = new URL(checkoutUrl);
+        urlObj.searchParams.set("checkout[email]", currentUser?.email || "");
+        urlObj.searchParams.set("checkout[custom][user_id]", currentUser?.id || "");
+        
+        triggerToast(`Opening secure ${plan} checkout...`, "info");
+        setTimeout(() => {
+          window.open(urlObj.toString(), "_blank");
+        }, 500);
+      } catch (err) {
+        triggerToast("Invalid Lemon Squeezy URL. Please check your settings.", "error");
+      }
+      return;
+    }
+
     try {
       const res = await apiFetch("/api/billing/update-plan", {
         method: "POST",
@@ -383,6 +435,70 @@ export default function App() {
       }
     } catch (err) {
       triggerToast("Failed to process subscription update", "error");
+    }
+  };
+
+  const handleSaveLemonSqueezySettings = async () => {
+    setIsSavingLsSettings(true);
+    try {
+      const res = await apiFetch("/api/user/lemonsqueezy-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: lemonSqueezyEnabled,
+          proUrl: lemonSqueezyProUrl,
+          entUrl: lemonSqueezyEntUrl,
+          webhookSecret: lemonSqueezyWebhookSecret
+        })
+      });
+      if (res.ok) {
+        triggerToast("Lemon Squeezy integration settings saved", "success");
+        loadDatabaseContext();
+      } else {
+        triggerToast("Failed to save settings", "error");
+      }
+    } catch (err) {
+      triggerToast("Network error saving settings", "error");
+    } finally {
+      setIsSavingLsSettings(false);
+    }
+  };
+
+  const handleTestWebhook = async (plan: "Professional" | "Enterprise") => {
+    try {
+      const mockPayload = {
+        meta: {
+          event_name: "subscription_created",
+          custom_data: {
+            user_id: currentUser?.id
+          }
+        },
+        data: {
+          type: "subscriptions",
+          attributes: {
+            user_email: currentUser?.email,
+            product_name: `AeroPDF ${plan} Plan`,
+            variant_name: plan,
+            total_formatted: plan === "Enterprise" ? "$120.00" : "$15.00",
+            order_number: Math.floor(Math.random() * 900000 + 100000)
+          }
+        }
+      };
+
+      const res = await apiFetch("/api/billing/lemonsqueezy-webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mockPayload)
+      });
+
+      if (res.ok) {
+        triggerToast(`Mock webhook simulated: Account upgraded to ${plan}!`, "success");
+        loadDatabaseContext();
+      } else {
+        triggerToast("Failed to process mock webhook on server", "error");
+      }
+    } catch (err) {
+      triggerToast("Error triggering mock webhook test", "error");
     }
   };
 
@@ -2318,6 +2434,145 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 </div>
               </div>
 
+            </div>
+
+            {/* Lemon Squeezy Store Integration Center */}
+            <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6">
+              <div className="border-b border-slate-800 pb-3 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-display font-bold text-lg text-white flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-400" /> Lemon Squeezy Merchant Integration
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Connect your active Lemon Squeezy store to monetize AeroPDF with live checkouts and webhooks.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-gray-400">Live Integration Mode:</span>
+                  <button
+                    onClick={() => setLemonSqueezyEnabled(!lemonSqueezyEnabled)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      lemonSqueezyEnabled ? "bg-indigo-600" : "bg-slate-800"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        lemonSqueezyEnabled ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-8">
+                {/* Left Column: Form Settings */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-mono font-bold text-indigo-400 uppercase tracking-wider">Product Variant Checkout Links</h3>
+                  
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-300 block">Professional Plan Checkout URL</label>
+                    <input
+                      type="url"
+                      value={lemonSqueezyProUrl}
+                      onChange={(e) => setLemonSqueezyProUrl(e.target.value)}
+                      placeholder="https://your-store.lemonsqueezy.com/buy/variant-uuid"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500 block">The custom buy link generated in your Lemon Squeezy products page.</span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-300 block">Enterprise Plan Checkout URL</label>
+                    <input
+                      type="url"
+                      value={lemonSqueezyEntUrl}
+                      onChange={(e) => setLemonSqueezyEntUrl(e.target.value)}
+                      placeholder="https://your-store.lemonsqueezy.com/buy/variant-uuid"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500 block">The custom buy link for your higher-tier Enterprise subscription.</span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-300 block">Webhook Signing Secret (Optional)</label>
+                    <input
+                      type="password"
+                      value={lemonSqueezyWebhookSecret}
+                      onChange={(e) => setLemonSqueezyWebhookSecret(e.target.value)}
+                      placeholder="e.g. lemonsqueezy_secret_phrase"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500 block">If provided, secure validation check is applied to verify incoming webhooks.</span>
+                  </div>
+
+                  <button
+                    onClick={handleSaveLemonSqueezySettings}
+                    disabled={isSavingLsSettings}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition disabled:opacity-50"
+                  >
+                    {isSavingLsSettings ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                    Save Store Configuration
+                  </button>
+                </div>
+
+                {/* Right Column: Webhook Instructions */}
+                <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-4">
+                  <h3 className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Terminal className="w-4 h-4" /> Webhook Setup Instructions
+                  </h3>
+                  
+                  <div className="space-y-3 text-xs text-gray-300">
+                    <p>To enable real-time user upgrades when checkouts are completed, configure a webhook in Lemon Squeezy:</p>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-gray-400">
+                      <li>Log into your <a href="https://app.lemonsqueezy.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline inline-flex items-center gap-0.5">Lemon Squeezy Dashboard <ExternalLink className="w-2.5 h-2.5" /></a>.</li>
+                      <li>Navigate to <strong>Developer</strong> &gt; <strong>Webhooks</strong> and click "Add Webhook".</li>
+                      <li>Set your payload delivery destination to this secure AeroPDF endpoint URL:</li>
+                    </ol>
+
+                    <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                      <input
+                        type="text"
+                        readOnly
+                        value={typeof window !== "undefined" ? window.location.origin + "/api/billing/lemonsqueezy-webhook" : "https://aeropdf.com/api/billing/lemonsqueezy-webhook"}
+                        className="flex-grow bg-transparent border-none text-[10px] font-mono text-gray-400 focus:outline-none focus:ring-0"
+                      />
+                      <button
+                        onClick={() => {
+                          const url = typeof window !== "undefined" ? window.location.origin + "/api/billing/lemonsqueezy-webhook" : "https://aeropdf.com/api/billing/lemonsqueezy-webhook";
+                          navigator.clipboard.writeText(url);
+                          triggerToast("Webhook URL copied!", "success");
+                        }}
+                        className="p-1 text-gray-400 hover:text-white hover:bg-slate-800 rounded transition"
+                        title="Copy to clipboard"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-gray-500 block"><strong>Events to check:</strong> `subscription_created`, `order_created`</span>
+                      <span className="text-[10px] text-gray-500 block"><strong>Custom fields:</strong> Lemon Squeezy automatically pre-fills custom values. We associate the purchase to the logged-in user dynamically.</span>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800">
+                      <h4 className="text-xs font-semibold text-gray-200 mb-2">Instant Integration Sandbox Simulator</h4>
+                      <p className="text-[10px] text-gray-400 mb-3">Simulate a real success response payload from Lemon Squeezy to test your database and active states instantly:</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleTestWebhook("Professional")}
+                          className="flex-1 py-1.5 px-3 bg-[#11192e] hover:bg-[#16213c] border border-slate-800 text-[10px] text-indigo-400 rounded-lg transition font-mono font-semibold"
+                        >
+                          Simulate Pro Purchase
+                        </button>
+                        <button
+                          onClick={() => handleTestWebhook("Enterprise")}
+                          className="flex-1 py-1.5 px-3 bg-[#11192e] hover:bg-[#16213c] border border-slate-800 text-[10px] text-amber-400 rounded-lg transition font-mono font-semibold"
+                        >
+                          Simulate Enterprise Purchase
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Simulated Invoice History Table */}

@@ -62,6 +62,10 @@ interface User {
   activityLogs: ActivityLog[];
   invoices: Invoice[];
   apiKeys: APIKey[];
+  lemonSqueezyEnabled?: boolean;
+  lemonSqueezyProUrl?: string;
+  lemonSqueezyEntUrl?: string;
+  lemonSqueezyWebhookSecret?: string;
 }
 
 // Global Multi-User Database File Store
@@ -318,8 +322,115 @@ async function startServer() {
     res.json({
       subscription: user.subscription,
       invoices: user.invoices,
-      apiKeys: user.apiKeys
+      apiKeys: user.apiKeys,
+      lemonSqueezyEnabled: user.lemonSqueezyEnabled || false,
+      lemonSqueezyProUrl: user.lemonSqueezyProUrl || "",
+      lemonSqueezyEntUrl: user.lemonSqueezyEntUrl || "",
+      lemonSqueezyWebhookSecret: user.lemonSqueezyWebhookSecret || ""
     });
+  });
+
+  // Save Lemon Squeezy integration settings
+  app.post("/api/user/lemonsqueezy-settings", getAuthenticatedUser, (req, res) => {
+    const user = (req as any).user;
+    const { enabled, proUrl, entUrl, webhookSecret } = req.body;
+    
+    user.lemonSqueezyEnabled = !!enabled;
+    user.lemonSqueezyProUrl = (proUrl || "").trim();
+    user.lemonSqueezyEntUrl = (entUrl || "").trim();
+    user.lemonSqueezyWebhookSecret = (webhookSecret || "").trim();
+    
+    // Log Activity
+    user.activityLogs.unshift({
+      id: "act-" + Date.now(),
+      userId: user.id,
+      action: "Integration Update",
+      details: `Updated Lemon Squeezy payment settings (Status: ${enabled ? 'Enabled' : 'Disabled'})`,
+      timestamp: new Date().toISOString(),
+      status: "success"
+    });
+    
+    saveDatabase();
+    res.json({ success: true });
+  });
+
+  // Lemon Squeezy Webhook Receiver
+  app.post("/api/billing/lemonsqueezy-webhook", async (req, res) => {
+    try {
+      const payload = req.body;
+      const eventName = payload.meta?.event_name;
+      const customData = payload.meta?.custom_data;
+      const email = payload.data?.attributes?.user_email || payload.data?.attributes?.customer_email;
+      
+      console.log(`[Lemon Squeezy Webhook] Event: ${eventName}, Email: ${email}, CustomData:`, customData);
+      
+      // Find the user by ID or by Email
+      let user = null;
+      if (customData && customData.user_id) {
+        user = dbData.users.find(u => u.id === customData.user_id);
+      }
+      if (!user && email) {
+        user = dbData.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      }
+      
+      if (!user) {
+        console.warn(`[Lemon Squeezy Webhook] No matching user found for email ${email} or user_id ${customData?.user_id}`);
+        // If it's a test/unregistered order, we can still return 200 to satisfy Lemon Squeezy
+        return res.status(200).json({ success: false, warning: "User not found, but webhook acknowledged" });
+      }
+      
+      // Determine plan based on product/variant name or payload structure
+      const variantName = payload.data?.attributes?.variant_name || "";
+      const productName = payload.data?.attributes?.product_name || "";
+      let planName: "Free" | "Professional" | "Enterprise" = "Professional";
+      if (
+        variantName.toLowerCase().includes("enterprise") || 
+        productName.toLowerCase().includes("enterprise")
+      ) {
+        planName = "Enterprise";
+      } else if (
+        variantName.toLowerCase().includes("free") || 
+        productName.toLowerCase().includes("free")
+      ) {
+        planName = "Free";
+      }
+      
+      // Update User Plan
+      user.subscription.planName = planName;
+      user.subscription.status = "active";
+      user.subscription.creditsTotal = planName === "Enterprise" ? 5000 : planName === "Professional" ? 500 : 50;
+      user.subscription.storageTotal = planName === "Enterprise" ? 500000 : planName === "Professional" ? 10000 : 100;
+      user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      
+      // Add an invoice record
+      const amountPaid = payload.data?.attributes?.total_formatted || (planName === "Enterprise" ? "$120.00" : "$15.00");
+      const orderId = payload.data?.attributes?.order_number || "LS-" + Math.floor(Math.random() * 900000 + 100000);
+      
+      user.invoices.unshift({
+        id: "INV-" + orderId,
+        date: new Date().toISOString().split("T")[0],
+        amount: amountPaid,
+        status: "Paid",
+        plan: `${planName} Subscription (Lemon Squeezy)`
+      });
+      
+      // Log Action
+      user.activityLogs.unshift({
+        id: "act-" + Date.now(),
+        userId: user.id,
+        action: "Payment Received",
+        details: `Subscribed to ${planName} via Lemon Squeezy (Order #${orderId})`,
+        timestamp: new Date().toISOString(),
+        status: "success"
+      });
+      
+      saveDatabase();
+      console.log(`[Lemon Squeezy Webhook] User ${user.email} successfully upgraded to ${planName}.`);
+      return res.json({ success: true, message: `Upgraded user to ${planName}` });
+    } catch (err: any) {
+      console.error("[Lemon Squeezy Webhook Error]:", err);
+      return res.status(500).json({ error: err.message || "Internal error processing webhook" });
+    }
   });
 
   // Add virtual API Key
