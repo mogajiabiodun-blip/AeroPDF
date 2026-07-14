@@ -700,6 +700,7 @@ async function startServer() {
       user.subscription.status = "active";
       user.subscription.creditsTotal = planName === "Enterprise" ? 5000 : planName === "Professional" ? 500 : 100;
       user.subscription.storageTotal = planName === "Enterprise" ? 500000 : planName === "Professional" ? 10000 : 100;
+      user.subscription.creditsUsed = 0; // Automatically reset creditsUsed to 0 on payment to add full credits immediately
       user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       
       // Add an invoice record
@@ -918,6 +919,7 @@ async function startServer() {
     user.subscription.billingCycle = cycle;
     user.subscription.creditsTotal = plan === "Enterprise" ? 5000 : plan === "Professional" ? 500 : 100;
     user.subscription.storageTotal = plan === "Enterprise" ? 500000 : plan === "Professional" ? 10000 : 100;
+    user.subscription.creditsUsed = 0; // Automatically reset creditsUsed to 0 to allocate full credits immediately on payment
     user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     
     user.invoices.unshift({
