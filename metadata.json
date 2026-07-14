@@ -1,6 +1,6 @@
 {
   "name": "AeroPDF Suite",
   "description": "An enterprise-grade, cloud-native PDF SaaS and document processing suite powered by AI.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

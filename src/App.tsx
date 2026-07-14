@@ -44,7 +44,9 @@ import {
   Globe,
   Fingerprint,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Mic,
+  MicOff
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TabType, PDFDocument, ActivityLog, Invoice, SubscriptionInfo, APIKey, AdminStats, ChatMessage, PDFToolId } from "./types";
@@ -136,6 +138,8 @@ export default function App() {
   const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([]);
   const [aiChatInput, setAiChatInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // Forgot Password States
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -1013,6 +1017,74 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
       setIsAiLoading(false);
     }
   };
+
+  const toggleSpeechRecognition = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      triggerToast("Web Speech API is not supported by your current browser. Try Google Chrome or Microsoft Edge.", "error");
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+    } else {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = "en-US";
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          triggerToast("Listening... Speak now.", "info");
+        };
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          if (transcript) {
+            setAiChatInput(prev => prev ? prev + " " + transcript : transcript);
+            triggerToast("Voice input added!", "success");
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error("Speech Recognition Error:", event.error);
+          setIsListening(false);
+          if (event.error === "not-allowed") {
+            triggerToast("Microphone access was denied. Please allow microphone permissions in your browser.", "error");
+          } else {
+            triggerToast(`Voice input error: ${event.error}`, "error");
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (err) {
+        console.error("Failed to initialize SpeechRecognition:", err);
+        triggerToast("Failed to start speech recognition", "error");
+        setIsListening(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, []);
 
   // Support Ticketing Simulation
   const sendSupportMessage = () => {
@@ -2704,17 +2776,31 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
 
                           {/* Chat inputs */}
                           <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={aiChatInput}
-                              onChange={(e) => setAiChatInput(e.target.value)}
-                              onKeyDown={(e) => e.key === "Enter" && sendAIChat()}
-                              placeholder="Type document query... (e.g., summarize the liability parameters)"
-                              className="flex-grow px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 outline-none"
-                            />
+                            <div className="relative flex-grow">
+                              <input
+                                type="text"
+                                value={aiChatInput}
+                                onChange={(e) => setAiChatInput(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && sendAIChat()}
+                                placeholder="Type document query... (e.g., summarize the liability parameters)"
+                                className="w-full pl-3 pr-10 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={toggleSpeechRecognition}
+                                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all cursor-pointer ${
+                                  isListening
+                                    ? "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse"
+                                    : "text-gray-400 hover:text-white hover:bg-slate-800"
+                                }`}
+                                title={isListening ? "Listening... Click to stop" : "Dictate query (Voice-to-Text)"}
+                              >
+                                {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
                             <button
                               onClick={sendAIChat}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow transition flex items-center gap-1.5"
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow transition flex items-center gap-1.5 shrink-0"
                             >
                               <Play className="w-3 h-3" /> Ask AI
                             </button>
