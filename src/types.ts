@@ -90,7 +90,15 @@ export type PDFToolId =
   | "convert-img"
   | "convert-md"
   | "sign"
-  | "form-fill";
+  | "form-fill"
+  | "pdf-to-word"
+  | "pdf-to-excel"
+  | "pdf-to-ppt"
+  | "pdf-to-jpg"
+  | "word-to-pdf"
+  | "excel-to-pdf"
+  | "ppt-to-pdf"
+  | "edit-text";
 
 export interface PDFTool {
   id: PDFToolId;

@@ -4,6 +4,7 @@ export const PDF_TOOLS: PDFTool[] = [
   // Organize
   { id: "merge", name: "Merge PDFs", description: "Combine multiple PDF files into a single document in any order.", category: "organize" },
   { id: "split", name: "Split PDF", description: "Extract specific page ranges or split each page into a separate file.", category: "organize" },
+  { id: "rotate", name: "Rotate Pages", description: "Rotate specific pages or entire documents clockwise dynamically.", category: "organize" },
   { id: "delete-pages", name: "Delete Pages", description: "Remove unwanted pages from your document seamlessly.", category: "organize" },
   { id: "organize", name: "Reorder & Organize", description: "Rearrange pages, insert blank pages, or rotate specific pages.", category: "organize", badge: "Hot" },
   
@@ -19,10 +20,18 @@ export const PDF_TOOLS: PDFTool[] = [
   // Conversion
   { id: "convert-img", name: "Image to PDF", description: "Convert JPG, PNG, WebP, or SVG images into standardized PDFs.", category: "conversion" },
   { id: "convert-md", name: "Markdown / Text to PDF", description: "Compile stylized markdown or raw text into structured PDF pages.", category: "conversion" },
+  { id: "pdf-to-word", name: "PDF to Word", description: "Convert your PDF documents into editable Microsoft Word DOCX files.", category: "conversion", badge: "Pro" },
+  { id: "pdf-to-excel", name: "PDF to Excel", description: "Extract tables from your PDF files into structured Microsoft Excel spreadsheets.", category: "conversion", badge: "Pro" },
+  { id: "pdf-to-ppt", name: "PDF to PowerPoint", description: "Convert PDF documents into editable Microsoft PowerPoint PPTX slides.", category: "conversion", badge: "Pro" },
+  { id: "pdf-to-jpg", name: "PDF to JPG", description: "Extract pages from your PDF document as high-quality JPEG images.", category: "conversion" },
+  { id: "word-to-pdf", name: "Word to PDF", description: "Convert Microsoft Word DOCX files into beautiful, standardized PDFs.", category: "conversion" },
+  { id: "excel-to-pdf", name: "Excel to PDF", description: "Convert spreadsheet XLSX worksheets into cleanly formatted PDF reports.", category: "conversion" },
+  { id: "ppt-to-pdf", name: "PPT to PDF", description: "Convert PowerPoint PPTX slide presentations into standard PDF files.", category: "conversion" },
 
   // Edit / Form
   { id: "sign", name: "Digital Signatures", description: "Draw, upload, or type your secure digital signature directly on pages.", category: "edit", badge: "Pro" },
-  { id: "form-fill", name: "Fill PDF Forms", description: "Complete form fields, add checkboxes, radio buttons, or custom text.", category: "edit" }
+  { id: "form-fill", name: "Fill PDF Forms", description: "Complete form fields, add checkboxes, radio buttons, or custom text.", category: "edit" },
+  { id: "edit-text", name: "Edit Text", description: "Reflow paragraphs and edit text directly within your PDF document.", category: "edit", badge: "Hot" }
 ];
 
 export const PRICING_PLANS = [
