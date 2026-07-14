@@ -1713,6 +1713,62 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   {item.label}
                 </button>
               ))}
+
+              {/* Mobile Auth Actions with Auto-Close */}
+              <div className="border-t border-slate-800/80 mt-3 pt-3">
+                {authToken && currentUser ? (
+                  <div className="space-y-3 px-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="text-xs font-bold text-gray-200">{currentUser.username}</span>
+                      </div>
+                      {subscription && (
+                        <span className="text-[10px] font-mono text-indigo-400 block uppercase tracking-wider">
+                          {subscription.planName}
+                        </span>
+                      )}
+                    </div>
+                    {subscription && (
+                      <div className="text-[10px] text-gray-400">
+                        {subscription.creditsTotal - subscription.creditsUsed} credits left
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        handleLogout();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="w-full text-center py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-gray-300 border border-slate-700/60 transition cursor-pointer"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 px-1">
+                    <button
+                      onClick={() => {
+                        setAuthMode("login");
+                        setCurrentTab("landing");
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="text-center py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white transition bg-slate-900 border border-slate-800 cursor-pointer"
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAuthMode("register");
+                        setCurrentTab("landing");
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-center py-2 rounded-xl text-xs font-semibold hover:opacity-95 shadow-md transition cursor-pointer"
+                    >
+                      Get Started
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         )}
@@ -2446,7 +2502,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                       <button
                         key={tool.id}
                         onClick={() => {
-                          const isRestricted = (subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress"].includes(tool.id);
+                          const isRestricted = (subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress", "word-to-pdf", "excel-to-pdf", "ppt-to-pdf", "pdf-to-word", "pdf-to-excel", "pdf-to-ppt"].includes(tool.id);
                           if (isRestricted) {
                             triggerToast(`The "${tool.name}" tool is exclusive to Paid subscriptions. Please upgrade!`, "warning");
                             return;
@@ -2468,7 +2524,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                           {tool.category === "conversion" && <FileText className="w-3.5 h-3.5" />}
                           {tool.category === "edit" && <Edit className="w-3.5 h-3.5" />}
                           <span className="truncate">{tool.name}</span>
-                          {(subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress"].includes(tool.id) && (
+                          {(subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress", "word-to-pdf", "excel-to-pdf", "ppt-to-pdf", "pdf-to-word", "pdf-to-excel", "pdf-to-ppt"].includes(tool.id) && (
                             <Lock className="w-3 h-3 text-rose-400 shrink-0 ml-1" />
                           )}
                         </div>
@@ -2500,7 +2556,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 </div>
 
                 {/* Core Interactive stage */}
-                {subscription?.planName === "Free" && !["merge", "split", "compress"].includes(activeToolId) ? (
+                {subscription?.planName === "Free" && !["merge", "split", "compress", "word-to-pdf", "excel-to-pdf", "ppt-to-pdf", "pdf-to-word", "pdf-to-excel", "pdf-to-ppt"].includes(activeToolId) ? (
                   <div className="p-8 rounded-2xl border border-dashed border-indigo-500/30 bg-[#0e1424] text-center space-y-6">
                     <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto animate-pulse">
                       <Lock className="w-6 h-6" />

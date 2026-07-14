@@ -20,9 +20,9 @@ export const PDF_TOOLS: PDFTool[] = [
   // Conversion
   { id: "convert-img", name: "Image to PDF", description: "Convert JPG, PNG, WebP, or SVG images into standardized PDFs.", category: "conversion" },
   { id: "convert-md", name: "Markdown / Text to PDF", description: "Compile stylized markdown or raw text into structured PDF pages.", category: "conversion" },
-  { id: "pdf-to-word", name: "PDF to Word", description: "Convert your PDF documents into editable Microsoft Word DOCX files.", category: "conversion", badge: "Pro" },
-  { id: "pdf-to-excel", name: "PDF to Excel", description: "Extract tables from your PDF files into structured Microsoft Excel spreadsheets.", category: "conversion", badge: "Pro" },
-  { id: "pdf-to-ppt", name: "PDF to PowerPoint", description: "Convert PDF documents into editable Microsoft PowerPoint PPTX slides.", category: "conversion", badge: "Pro" },
+  { id: "pdf-to-word", name: "PDF to Word", description: "Convert your PDF documents into editable Microsoft Word DOCX files.", category: "conversion" },
+  { id: "pdf-to-excel", name: "PDF to Excel", description: "Extract tables from your PDF files into structured Microsoft Excel spreadsheets.", category: "conversion" },
+  { id: "pdf-to-ppt", name: "PDF to PowerPoint", description: "Convert PDF documents into editable Microsoft PowerPoint PPTX slides.", category: "conversion" },
   { id: "pdf-to-jpg", name: "PDF to JPG", description: "Extract pages from your PDF document as high-quality JPEG images.", category: "conversion" },
   { id: "word-to-pdf", name: "Word to PDF", description: "Convert Microsoft Word DOCX files into beautiful, standardized PDFs.", category: "conversion" },
   { id: "excel-to-pdf", name: "Excel to PDF", description: "Convert spreadsheet XLSX worksheets into cleanly formatted PDF reports.", category: "conversion" },
