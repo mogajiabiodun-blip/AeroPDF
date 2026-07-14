@@ -174,6 +174,7 @@ function requireEnterprise(req: express.Request, res: express.Response, next: ex
 
 // Lazy initialization of Gemini client
 let aiClient: GoogleGenAI | null = null;
+const resetCodes: Record<string, { code: string; expires: number }> = {};
 function getGeminiClient(): GoogleGenAI {
   if (!aiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -278,7 +279,10 @@ async function startServer() {
     }
 
     const normalizedUsername = username.trim().toLowerCase();
-    const user = dbData.users.find(u => u.username.toLowerCase() === normalizedUsername);
+    const user = dbData.users.find(u => 
+      u.username.toLowerCase() === normalizedUsername || 
+      u.email.toLowerCase() === normalizedUsername
+    );
 
     if (!user || user.passwordHash !== password) {
       return res.status(401).json({ error: "Invalid username or password." });
@@ -294,6 +298,159 @@ async function startServer() {
       status: "success"
     });
     saveDatabase();
+
+    res.json({
+      success: true,
+      token: user.id,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        subscription: user.subscription
+      }
+    });
+  });
+
+  // Request password reset (Forgot Password)
+  app.post("/api/auth/forgot-password", (req, res) => {
+    const { identity } = req.body;
+    if (!identity) {
+      return res.status(400).json({ error: "Username or email address is required." });
+    }
+
+    const normalizedIdentity = identity.trim().toLowerCase();
+    const user = dbData.users.find(u => 
+      u.username.toLowerCase() === normalizedIdentity || 
+      u.email.toLowerCase() === normalizedIdentity
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "No registered account found matching that username or email address." });
+    }
+
+    // Generate a 6-digit random code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store in-memory with 15 minutes expiration
+    resetCodes[user.id] = {
+      code,
+      expires: Date.now() + 15 * 60 * 1000
+    };
+
+    // Helper to mask email for privacy
+    const maskEmail = (emailStr: string) => {
+      const parts = emailStr.split("@");
+      if (parts.length !== 2) return emailStr;
+      const [name, domain] = parts;
+      const maskedName = name.length > 2 
+        ? name.substring(0, 2) + "***" + name.substring(name.length - 1)
+        : name + "***";
+      return `${maskedName}@${domain}`;
+    };
+
+    console.log(`Password reset requested for ${user.username}. Generated code: ${code}`);
+
+    res.json({
+      success: true,
+      message: "Verification code sent successfully.",
+      email: maskEmail(user.email),
+      code: code // Expose code to client-side so it can simulate email delivery inside the app
+    });
+  });
+
+  // Reset Password using code
+  app.post("/api/auth/reset-password", (req, res) => {
+    const { identity, code, newPassword } = req.body;
+    if (!identity || !code || !newPassword) {
+      return res.status(400).json({ error: "Identity, reset code, and new password are required." });
+    }
+
+    const normalizedIdentity = identity.trim().toLowerCase();
+    const user = dbData.users.find(u => 
+      u.username.toLowerCase() === normalizedIdentity || 
+      u.email.toLowerCase() === normalizedIdentity
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "User account not found." });
+    }
+
+    const record = resetCodes[user.id];
+    if (!record || record.code !== code.trim() || record.expires < Date.now()) {
+      return res.status(400).json({ error: "The verification code is invalid or has expired. Please try again." });
+    }
+
+    // Update password
+    user.passwordHash = newPassword;
+    
+    // Log recovery activity
+    user.activityLogs.unshift({
+      id: "act-reset-" + Date.now(),
+      userId: user.id,
+      action: "Password Recovered",
+      details: "Password reset completed via self-service verification",
+      timestamp: new Date().toISOString(),
+      status: "success"
+    });
+
+    // Save database
+    saveDatabase();
+
+    // Clean up used code
+    delete resetCodes[user.id];
+
+    res.json({
+      success: true,
+      message: "Your password has been successfully reset. You can now log in with your new password."
+    });
+  });
+
+  // Backup restore endpoint for ephemeral container file resets
+  app.post("/api/auth/restore", (req, res) => {
+    const { id, username, passwordHash, email, subscription, documents, activityLogs, apiKeys, invoices } = req.body;
+    if (!username || !email) {
+      return res.status(400).json({ error: "Invalid backup profile parameters." });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    let user = dbData.users.find(u => 
+      u.username.toLowerCase() === normalizedUsername || 
+      u.email.toLowerCase() === normalizedEmail
+    );
+
+    if (!user) {
+      // Recreate user exactly as stored in client-side localStorage
+      user = {
+        id: id || "user-" + Date.now(),
+        username: username.trim(),
+        passwordHash: passwordHash || "password",
+        email: normalizedEmail,
+        createdAt: new Date().toISOString(),
+        subscription: subscription || {
+          planName: "Free",
+          status: "active",
+          billingCycle: "monthly",
+          nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+          creditsUsed: 0,
+          creditsTotal: 50,
+          storageUsed: 0,
+          storageTotal: 100
+        },
+        documents: documents || [],
+        activityLogs: activityLogs || [
+          { id: "act-restore-" + Date.now(), userId: id || "user", action: "Account Restored", details: "Restored from persistent client-side backup context", timestamp: new Date().toISOString(), status: "success" }
+        ],
+        invoices: invoices || [],
+        apiKeys: apiKeys || []
+      };
+      dbData.users.push(user);
+      saveDatabase();
+      console.log(`User ${user.username} successfully restored from client-side persistent vault.`);
+    } else {
+      console.log(`User ${user.username} already exists in runtime memory, skipping restoration.`);
+    }
 
     res.json({
       success: true,

@@ -35,6 +35,7 @@ import {
   Bookmark,
   MessageSquare,
   Eye,
+  EyeOff,
   XCircle,
   Cpu,
   ChevronRight,
@@ -86,6 +87,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   
@@ -134,6 +136,19 @@ export default function App() {
   const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([]);
   const [aiChatInput, setAiChatInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // Forgot Password States
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordIdentity, setForgotPasswordIdentity] = useState("");
+  const [forgotPasswordCode, setForgotPasswordCode] = useState("");
+  const [forgotPasswordNewPass, setForgotPasswordNewPass] = useState("");
+  const [forgotPasswordConfirmPass, setForgotPasswordConfirmPass] = useState("");
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
+  const [forgotPasswordStep, setForgotPasswordStep] = useState<1 | 2>(1); // 1: request code, 2: reset password
+  const [forgotPasswordMaskedEmail, setForgotPasswordMaskedEmail] = useState("");
+  const [forgotPasswordSimulatedCode, setForgotPasswordSimulatedCode] = useState("");
+  const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false);
 
   // Support / Admin States
   const [supportMessage, setSupportMessage] = useState("");
@@ -202,6 +217,32 @@ export default function App() {
         // Load data context
         await loadDatabaseContext();
       } else {
+        // Ephemeral container session restoration
+        const backupStr = localStorage.getItem("aeropdf_user_backup");
+        if (backupStr) {
+          try {
+            const backup = JSON.parse(backupStr);
+            if (backup && backup.username && backup.email) {
+              const restoreRes = await fetch("/api/auth/restore", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(backup)
+              });
+              if (restoreRes.ok) {
+                const restoreData = await restoreRes.json();
+                if (restoreData.success) {
+                  localStorage.setItem("aeropdf_token", restoreData.token);
+                  setAuthToken(restoreData.token);
+                  setCurrentUser(restoreData.user);
+                  await loadDatabaseContext();
+                  return;
+                }
+              }
+            }
+          } catch (restoreErr) {
+            console.error("Failed to restore session from backup:", restoreErr);
+          }
+        }
         handleLogout();
       }
     } catch (err) {
@@ -209,8 +250,26 @@ export default function App() {
     }
   };
 
+  // Persist local user backup state to survive ephemeral server container refreshes
+  useEffect(() => {
+    if (currentUser) {
+      const backupObj = {
+        id: currentUser.id,
+        username: currentUser.username,
+        email: currentUser.email,
+        subscription,
+        documents,
+        activityLogs,
+        invoices,
+        apiKeys
+      };
+      localStorage.setItem("aeropdf_user_backup", JSON.stringify(backupObj));
+    }
+  }, [currentUser, subscription, documents, activityLogs, invoices, apiKeys]);
+
   const handleLogout = () => {
     localStorage.removeItem("aeropdf_token");
+    localStorage.removeItem("aeropdf_user_backup");
     setAuthToken(null);
     setCurrentUser(null);
     setDocuments([]);
@@ -261,6 +320,87 @@ export default function App() {
       triggerToast("Network connection issue. Please check Render backend.", "error");
     } finally {
       setIsAuthLoading(false);
+    }
+  };
+
+  const handleForgotPasswordRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotPasswordIdentity) {
+      triggerToast("Please enter your username or email address", "warning");
+      return;
+    }
+
+    setIsForgotPasswordLoading(true);
+    try {
+      const res = await apiFetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identity: forgotPasswordIdentity })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setForgotPasswordMaskedEmail(data.email);
+        setForgotPasswordSimulatedCode(data.code);
+        setForgotPasswordStep(2);
+        triggerToast("Reset verification code generated!", "success");
+      } else {
+        triggerToast(data.error || "Failed to initiate recovery", "error");
+      }
+    } catch (err) {
+      triggerToast("Network connection issue.", "error");
+    } finally {
+      setIsForgotPasswordLoading(false);
+    }
+  };
+
+  const handlePasswordResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotPasswordIdentity || !forgotPasswordCode || !forgotPasswordNewPass || !forgotPasswordConfirmPass) {
+      triggerToast("Please fill in all recovery fields", "warning");
+      return;
+    }
+
+    if (forgotPasswordNewPass !== forgotPasswordConfirmPass) {
+      triggerToast("New passwords do not match", "error");
+      return;
+    }
+
+    setIsForgotPasswordLoading(true);
+    try {
+      const res = await apiFetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identity: forgotPasswordIdentity,
+          code: forgotPasswordCode,
+          newPassword: forgotPasswordNewPass
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        triggerToast(data.message || "Password updated successfully!", "success");
+        // Reset states
+        setShowForgotPassword(false);
+        setForgotPasswordIdentity("");
+        setForgotPasswordCode("");
+        setForgotPasswordNewPass("");
+        setForgotPasswordConfirmPass("");
+        setForgotPasswordStep(1);
+        setForgotPasswordSimulatedCode("");
+        setForgotPasswordMaskedEmail("");
+        // Switch login flow & prefill
+        setAuthMode("login");
+        setAuthUsername(forgotPasswordIdentity);
+        setAuthPassword("");
+      } else {
+        triggerToast(data.error || "Failed to reset password", "error");
+      }
+    } catch (err) {
+      triggerToast("Network connection issue.", "error");
+    } finally {
+      setIsForgotPasswordLoading(false);
     }
   };
 
@@ -940,6 +1080,203 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
         )}
       </AnimatePresence>
 
+      {/* Forgot Password Modal Overlay */}
+      <AnimatePresence>
+        {showForgotPassword && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md p-6 sm:p-8 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6 shadow-2xl overflow-hidden"
+            >
+              {/* Subtle top visual glow */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Header */}
+              <div className="flex justify-between items-start relative z-10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                    <Unlock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-base text-white">Reset Password</h3>
+                    <p className="text-[11px] text-gray-400">Recover your account credentials</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setForgotPasswordStep(1);
+                    setForgotPasswordIdentity("");
+                    setForgotPasswordCode("");
+                    setForgotPasswordNewPass("");
+                    setForgotPasswordConfirmPass("");
+                    setForgotPasswordSimulatedCode("");
+                  }}
+                  className="p-1 rounded-lg text-gray-500 hover:text-white hover:bg-slate-800/80 transition cursor-pointer outline-none"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Step 1: Request Code Form */}
+              {forgotPasswordStep === 1 ? (
+                <form onSubmit={handleForgotPasswordRequest} className="space-y-4 relative z-10">
+                  <p className="text-xs leading-relaxed text-gray-300">
+                    Enter your registered username or email address. We'll generate a secure, self-service 6-digit recovery code instantly so you can recover access.
+                  </p>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Username or Email</label>
+                    <input
+                      type="text"
+                      value={forgotPasswordIdentity}
+                      onChange={(e) => setForgotPasswordIdentity(e.target.value)}
+                      placeholder="Enter your username or email address"
+                      required
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isForgotPasswordLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-xs font-bold shadow-lg transition duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isForgotPasswordLoading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Generating code...</span>
+                      </>
+                    ) : (
+                      <span>Generate Reset Code</span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                /* Step 2: Verification and Reset Password Form */
+                <form onSubmit={handlePasswordResetSubmit} className="space-y-4 relative z-10">
+                  {/* Simulated Email Delivery Box */}
+                  <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/5 space-y-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-semibold text-indigo-400">
+                      <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                      </span>
+                      <span>Simulated Email Delivery Indicator</span>
+                    </div>
+                    <p className="text-gray-300 text-[11px]">
+                      A verification email simulation was dispatched to: <span className="font-semibold text-white">{forgotPasswordMaskedEmail}</span>
+                    </p>
+                    <div className="flex items-center justify-between bg-slate-950 px-3 py-2 rounded-lg border border-slate-800 mt-1">
+                      <div>
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider block font-mono">Reset Verification Code</span>
+                        <span className="text-sm font-bold text-emerald-400 font-mono tracking-widest">{forgotPasswordSimulatedCode}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotPasswordCode(forgotPasswordSimulatedCode);
+                          triggerToast("Verification code filled!", "info");
+                        }}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Key className="w-3 h-3" /> Auto-Fill
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Verification Code</label>
+                      <input
+                        type="text"
+                        value={forgotPasswordCode}
+                        onChange={(e) => setForgotPasswordCode(e.target.value)}
+                        placeholder="Enter 6-digit code"
+                        maxLength={6}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition font-mono tracking-widest text-center text-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">New Password</label>
+                      <div className="relative">
+                        <input
+                          type={showForgotNewPassword ? "text" : "password"}
+                          value={forgotPasswordNewPass}
+                          onChange={(e) => setForgotPasswordNewPass(e.target.value)}
+                          placeholder="••••••••"
+                          required
+                          className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition outline-none cursor-pointer"
+                          title={showForgotNewPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showForgotNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Confirm New Password</label>
+                      <div className="relative">
+                        <input
+                          type={showForgotConfirmPassword ? "text" : "password"}
+                          value={forgotPasswordConfirmPass}
+                          onChange={(e) => setForgotPasswordConfirmPass(e.target.value)}
+                          placeholder="••••••••"
+                          required
+                          className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition outline-none cursor-pointer"
+                          title={showForgotConfirmPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showForgotConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setForgotPasswordStep(1)}
+                      className="w-1/3 border border-slate-800 hover:border-slate-700 bg-slate-950 text-gray-300 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isForgotPasswordLoading}
+                      className="w-2/3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white py-2.5 rounded-xl text-xs font-bold shadow-lg transition duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isForgotPasswordLoading ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Resetting...</span>
+                        </>
+                      ) : (
+                        <span>Reset Password</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Primary Header/Nav */}
       <header className="sticky top-0 z-40 bg-[#0e1424]/90 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -1172,27 +1509,55 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 )}
 
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Username</label>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
+                    {authMode === "login" ? "Username or Email" : "Username"}
+                  </label>
                   <input
                     type="text"
                     value={authUsername}
                     onChange={(e) => setAuthUsername(e.target.value)}
-                    placeholder="Enter your username"
+                    placeholder={authMode === "login" ? "Enter your username or email address" : "Create a username"}
                     required
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Password</label>
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
-                  />
+                  <div className="flex justify-between items-center">
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Password</label>
+                    {authMode === "login" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowForgotPassword(true);
+                          setForgotPasswordIdentity(authUsername);
+                          setForgotPasswordStep(1);
+                          setForgotPasswordSimulatedCode("");
+                        }}
+                        className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 transition outline-none cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition outline-none cursor-pointer"
+                      title={showPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 <button
@@ -2804,6 +3169,236 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary of Subscription Access Restrictions */}
+            <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-8 shadow-xl">
+              <div className="border-b border-slate-800 pb-3">
+                <h2 className="font-display font-bold text-lg text-white flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-indigo-400" /> Summary of Subscription Access Restrictions
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Detailed comparison matrix of available tool boundaries, file sizes, credits, and capability locks across account tiers.
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-6">
+                {/* Free Tier */}
+                <div className={`p-5 rounded-xl border relative flex flex-col justify-between ${
+                  subscription?.planName === "Free" 
+                    ? "border-indigo-500 bg-indigo-500/5 shadow-lg shadow-indigo-500/5" 
+                    : "border-slate-800/80 bg-slate-950/40"
+                }`}>
+                  {subscription?.planName === "Free" && (
+                    <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 bg-indigo-500 text-white rounded-full text-[9px] font-bold font-mono tracking-wider uppercase">
+                      Your Active Plan
+                    </span>
+                  )}
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> Free Tier
+                      </h3>
+                      <p className="text-[11px] text-gray-500 mt-1">For casual PDF readers and single operations.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-bold text-indigo-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1">
+                        Boundaries & Allocations
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Monthly AI Credits:</span>
+                          <span className="font-semibold text-white font-mono">50</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Max Upload Size:</span>
+                          <span className="font-semibold text-white font-mono">10 MB / file</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Total Cloud Vault:</span>
+                          <span className="font-semibold text-white font-mono">100 MB</span>
+                        </li>
+                      </ul>
+
+                      <div className="text-[10px] font-bold text-indigo-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1 pt-1">
+                        Feature Restrictions
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Basic Toolkit (Merge, Split, Compress)</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-gray-500">
+                          <Lock className="w-3.5 h-3.5 text-rose-500/70 shrink-0 mt-0.5" />
+                          <span className="line-through">Advanced Toolkit (Rotate, Delete Pages)</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-gray-500">
+                          <Lock className="w-3.5 h-3.5 text-rose-500/70 shrink-0 mt-0.5" />
+                          <span className="line-through">Gemini AI Workspace & Chat</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-gray-500">
+                          <Lock className="w-3.5 h-3.5 text-rose-500/70 shrink-0 mt-0.5" />
+                          <span className="line-through">Developer REST API Keys</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {subscription?.planName !== "Free" && (
+                    <button
+                      onClick={() => handleUpgradePlan("Free")}
+                      className="mt-6 w-full py-1.5 bg-slate-950 hover:bg-slate-900 text-gray-400 hover:text-white border border-slate-800 text-[11px] font-bold rounded-lg transition"
+                    >
+                      Downgrade to Free
+                    </button>
+                  )}
+                </div>
+
+                {/* Professional Tier */}
+                <div className={`p-5 rounded-xl border relative flex flex-col justify-between ${
+                  subscription?.planName === "Professional" 
+                    ? "border-indigo-500 bg-indigo-500/5 shadow-lg shadow-indigo-500/5" 
+                    : "border-slate-800/80 bg-slate-950/40"
+                }`}>
+                  {subscription?.planName === "Professional" && (
+                    <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 bg-indigo-500 text-white rounded-full text-[9px] font-bold font-mono tracking-wider uppercase">
+                      Your Active Plan
+                    </span>
+                  )}
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-indigo-400" /> Professional Tier ($15/mo)
+                      </h3>
+                      <p className="text-[11px] text-gray-500 mt-1">For power users, researchers, and professional contractors.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-bold text-indigo-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1">
+                        Boundaries & Allocations
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Monthly AI Credits:</span>
+                          <span className="font-semibold text-white font-mono">500</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Max Upload Size:</span>
+                          <span className="font-semibold text-white font-mono">2 GB / file</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Total Cloud Vault:</span>
+                          <span className="font-semibold text-white font-mono">10 GB</span>
+                        </li>
+                      </ul>
+
+                      <div className="text-[10px] font-bold text-indigo-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1 pt-1">
+                        Feature Access
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Unlimited runs on all 15+ PDF tools</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Advanced AI workspace semantic engine</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Full conversational PDF Chat with Gemini</span>
+                        </li>
+                        <li className="flex items-start gap-2 text-gray-500">
+                          <Lock className="w-3.5 h-3.5 text-rose-500/70 shrink-0 mt-0.5" />
+                          <span className="line-through">Developer REST API Keys</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {subscription?.planName !== "Professional" && (
+                    <button
+                      onClick={() => handleUpgradePlan("Professional")}
+                      className="mt-6 w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-lg transition shadow"
+                    >
+                      Upgrade to Professional
+                    </button>
+                  )}
+                </div>
+
+                {/* Enterprise Tier */}
+                <div className={`p-5 rounded-xl border relative flex flex-col justify-between ${
+                  subscription?.planName === "Enterprise" 
+                    ? "border-amber-500 bg-amber-500/5 shadow-lg shadow-amber-500/5" 
+                    : "border-slate-800/80 bg-slate-950/40"
+                }`}>
+                  {subscription?.planName === "Enterprise" && (
+                    <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 bg-amber-500 text-slate-950 rounded-full text-[9px] font-bold font-mono tracking-wider uppercase">
+                      Your Active Plan
+                    </span>
+                  )}
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <Cpu className="w-4 h-4 text-amber-400" /> Enterprise Tier ($49/mo)
+                      </h3>
+                      <p className="text-[11px] text-gray-500 mt-1">For engineering divisions, tech organizations, and developers.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="text-[10px] font-bold text-amber-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1">
+                        Boundaries & Allocations
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Monthly AI Credits:</span>
+                          <span className="font-semibold text-white font-mono">Unlimited</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Max Upload Size:</span>
+                          <span className="font-semibold text-white font-mono">Unlimited</span>
+                        </li>
+                        <li className="flex items-center justify-between">
+                          <span className="text-gray-400">Total Cloud Vault:</span>
+                          <span className="font-semibold text-white font-mono">Unlimited</span>
+                        </li>
+                      </ul>
+
+                      <div className="text-[10px] font-bold text-amber-400 font-mono uppercase tracking-wider border-b border-slate-800/60 pb-1 pt-1">
+                        Feature Access
+                      </div>
+                      <ul className="space-y-2 text-[11px] text-gray-300">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>All Pro capabilities included</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Developer API secret token engine</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>REST endpoints & sandbox checkouts</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>Custom OCR + SLA delivery streams</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {subscription?.planName !== "Enterprise" && (
+                    <button
+                      onClick={() => handleUpgradePlan("Enterprise")}
+                      className="mt-6 w-full py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold rounded-lg transition shadow"
+                    >
+                      Upgrade to Enterprise
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
