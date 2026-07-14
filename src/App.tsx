@@ -458,18 +458,21 @@ export default function App() {
       if (res.ok) setAdminStats(await res.json());
 
       const subRes = await apiFetch("/api/admin/subscribers");
-      if (subRes.ok) setSubscribers(await subRes.json());
+      if (subRes.ok) {
+        const data = await subRes.json();
+        setSubscribers(data.subscribers || []);
+      }
     } catch (err) {
       console.error("Failed to load admin stats", err);
     }
   };
 
-  const handleUpdateSubscriber = async (username: string, planName: string, creditsTotal: number, creditsUsed: number) => {
+  const handleUpdateSubscriber = async (userId: string, planName: string, creditsTotal: number, creditsUsed: number) => {
     try {
       const res = await apiFetch("/api/admin/subscribers/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, planName, creditsTotal, creditsUsed })
+        body: JSON.stringify({ userId, planName, creditsTotal, creditsUsed })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -4405,7 +4408,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
   );
 }
 
-const SubscriberRow = ({ sub, onSave }: { sub: any; onSave: (username: string, planName: string, creditsTotal: number, creditsUsed: number) => void; key?: any }) => {
+const SubscriberRow = ({ sub, onSave }: { sub: any; onSave: (userId: string, planName: string, creditsTotal: number, creditsUsed: number) => void; key?: any }) => {
   const [plan, setPlan] = useState(sub.planName || "Free");
   const [total, setTotal] = useState(sub.creditsTotal || 100);
   const [used, setUsed] = useState(sub.creditsUsed || 0);
@@ -4451,7 +4454,7 @@ const SubscriberRow = ({ sub, onSave }: { sub: any; onSave: (username: string, p
         </div>
         <div className="flex items-end col-span-2 md:col-span-1 pt-4 md:pt-0">
           <button
-            onClick={() => onSave(sub.username, plan, total, used)}
+            onClick={() => onSave(sub.userId, plan, total, used)}
             className="w-full md:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Check className="w-3.5 h-3.5" /> Save
