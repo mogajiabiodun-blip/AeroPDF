@@ -132,8 +132,86 @@ function saveDatabase() {
   }
 }
 
+// Global Subscribers Database File Store
+const SUBSCRIBERS_PATH = path.join(process.cwd(), "subscribers.json");
+
+interface Subscriber {
+  id: string;
+  userId: string;
+  username: string;
+  email: string;
+  planName: "Free" | "Professional" | "Enterprise";
+  status: "active" | "past_due" | "canceled";
+  billingCycle: "monthly" | "yearly";
+  creditsUsed: number;
+  creditsTotal: number;
+  startDate: string;
+}
+
+let subscribersData: { subscribers: Subscriber[] } = { subscribers: [] };
+
+function loadSubscribers() {
+  try {
+    if (fs.existsSync(SUBSCRIBERS_PATH)) {
+      const content = fs.readFileSync(SUBSCRIBERS_PATH, "utf-8");
+      subscribersData = JSON.parse(content);
+      console.log(`Subscribers database loaded successfully with ${subscribersData.subscribers.length} subscribers.`);
+    } else {
+      console.log("No subscribers database found. Initializing with default subscriber...");
+      const defaultSub: Subscriber = {
+        id: "sub-default",
+        userId: "user-default",
+        username: "admin",
+        email: "admin@aeropdf.com",
+        planName: "Professional",
+        status: "active",
+        billingCycle: "monthly",
+        creditsUsed: 124,
+        creditsTotal: 500,
+        startDate: "2026-07-01T10:00:00Z"
+      };
+      subscribersData.subscribers = [defaultSub];
+      saveSubscribers();
+    }
+  } catch (err) {
+    console.error("Failed to load or initialize subscribers database:", err);
+  }
+}
+
+function saveSubscribers() {
+  try {
+    fs.writeFileSync(SUBSCRIBERS_PATH, JSON.stringify(subscribersData, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Failed to save subscribers database:", err);
+  }
+}
+
+function syncSubscriber(user: User) {
+  const existingIndex = subscribersData.subscribers.findIndex(s => s.userId === user.id);
+  const subscriberInfo: Subscriber = {
+    id: existingIndex >= 0 ? subscribersData.subscribers[existingIndex].id : "sub-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+    userId: user.id,
+    username: user.username,
+    email: user.email,
+    planName: user.subscription.planName,
+    status: user.subscription.status,
+    billingCycle: user.subscription.billingCycle,
+    creditsUsed: user.subscription.creditsUsed,
+    creditsTotal: user.subscription.creditsTotal,
+    startDate: existingIndex >= 0 ? subscribersData.subscribers[existingIndex].startDate : new Date().toISOString()
+  };
+
+  if (existingIndex >= 0) {
+    subscribersData.subscribers[existingIndex] = subscriberInfo;
+  } else {
+    subscribersData.subscribers.push(subscriberInfo);
+  }
+  saveSubscribers();
+}
+
 // Boot database
 loadDatabase();
+loadSubscribers();
 
 // Authentication Middleware
 function getAuthenticatedUser(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -242,7 +320,7 @@ async function startServer() {
         billingCycle: "monthly",
         nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
         creditsUsed: 0,
-        creditsTotal: 50,
+        creditsTotal: 100,
         storageUsed: 0,
         storageTotal: 100
       },
@@ -258,6 +336,7 @@ async function startServer() {
 
     dbData.users.push(newUser);
     saveDatabase();
+    syncSubscriber(newUser);
 
     res.json({
       success: true,
@@ -434,7 +513,7 @@ async function startServer() {
           billingCycle: "monthly",
           nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
           creditsUsed: 0,
-          creditsTotal: 50,
+          creditsTotal: 100,
           storageUsed: 0,
           storageTotal: 100
         },
@@ -447,6 +526,7 @@ async function startServer() {
       };
       dbData.users.push(user);
       saveDatabase();
+      syncSubscriber(user);
       console.log(`User ${user.username} successfully restored from client-side persistent vault.`);
     } else {
       console.log(`User ${user.username} already exists in runtime memory, skipping restoration.`);
@@ -493,6 +573,47 @@ async function startServer() {
       storageUsageTotal: "24.5 TB of 100 TB",
       recentLogs
     });
+  });
+
+  // Get all subscribers in subscribers database
+  app.get("/api/admin/subscribers", getAuthenticatedUser, (req, res) => {
+    const currentUser = (req as any).user;
+    if (currentUser.username !== "admin") {
+      return res.status(403).json({ error: "Access denied. Exclusively managed by Owner/Admin." });
+    }
+    
+    // Auto-sync current database users to keep files synchronized
+    dbData.users.forEach(user => {
+      syncSubscriber(user);
+    });
+
+    res.json({ success: true, subscribers: subscribersData.subscribers });
+  });
+
+  // Admin updating a subscriber directly
+  app.post("/api/admin/subscribers/update", getAuthenticatedUser, (req, res) => {
+    const currentUser = (req as any).user;
+    if (currentUser.username !== "admin") {
+      return res.status(403).json({ error: "Access denied. Exclusively managed by Owner/Admin." });
+    }
+
+    const { userId, planName, status, billingCycle, creditsTotal, creditsUsed } = req.body;
+    
+    const user = dbData.users.find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found in main database." });
+    }
+
+    user.subscription.planName = planName || user.subscription.planName;
+    user.subscription.status = status || user.subscription.status;
+    user.subscription.billingCycle = billingCycle || user.subscription.billingCycle;
+    if (creditsTotal !== undefined) user.subscription.creditsTotal = Number(creditsTotal);
+    if (creditsUsed !== undefined) user.subscription.creditsUsed = Number(creditsUsed);
+    
+    saveDatabase();
+    syncSubscriber(user);
+
+    res.json({ success: true, subscribers: subscribersData.subscribers, message: `Subscriber ${user.username} updated successfully!` });
   });
 
   // Get current subscription & stats
@@ -577,7 +698,7 @@ async function startServer() {
       // Update User Plan
       user.subscription.planName = planName;
       user.subscription.status = "active";
-      user.subscription.creditsTotal = planName === "Enterprise" ? 5000 : planName === "Professional" ? 500 : 50;
+      user.subscription.creditsTotal = planName === "Enterprise" ? 5000 : planName === "Professional" ? 500 : 100;
       user.subscription.storageTotal = planName === "Enterprise" ? 500000 : planName === "Professional" ? 10000 : 100;
       user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       
@@ -604,6 +725,7 @@ async function startServer() {
       });
       
       saveDatabase();
+      syncSubscriber(user);
       console.log(`[Lemon Squeezy Webhook] User ${user.email} successfully upgraded to ${planName}.`);
       return res.json({ success: true, message: `Upgraded user to ${planName}` });
     } catch (err: any) {
@@ -794,7 +916,7 @@ async function startServer() {
     const { plan, cycle } = req.body;
     user.subscription.planName = plan;
     user.subscription.billingCycle = cycle;
-    user.subscription.creditsTotal = plan === "Enterprise" ? 5000 : plan === "Professional" ? 500 : 50;
+    user.subscription.creditsTotal = plan === "Enterprise" ? 5000 : plan === "Professional" ? 500 : 100;
     user.subscription.storageTotal = plan === "Enterprise" ? 500000 : plan === "Professional" ? 10000 : 100;
     user.subscription.nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     
@@ -815,6 +937,7 @@ async function startServer() {
       status: "success"
     });
     saveDatabase();
+    syncSubscriber(user);
 
     res.json({ success: true, subscription: user.subscription });
   });

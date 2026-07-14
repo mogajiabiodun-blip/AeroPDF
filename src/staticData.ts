@@ -32,7 +32,7 @@ export const PRICING_PLANS = [
     priceYearly: "$0",
     description: "Perfect for quick, casual file updates.",
     features: [
-      "5 PDF operations per day",
+      "100 monthly operations / credits",
       "Up to 10 MB per file limit",
       "Basic Merge, Split & Compress",
       "Standard client-side processing",

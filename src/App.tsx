@@ -86,6 +86,7 @@ export default function App() {
   // User Authentication State
   const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem("aeropdf_token"));
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; email: string } | null>(null);
+  const isOwner = currentUser?.username === "admin" || currentUser?.email === "admin@aeropdf.com";
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -100,6 +101,8 @@ export default function App() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [apiKeys, setApiKeys] = useState<APIKey[]>([]);
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
+  const [subscribers, setSubscribers] = useState<any[]>([]);
+  const [adminSubSearch, setAdminSubSearch] = useState("");
   
   // Interactivity/UX States
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -201,6 +204,13 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  // Enforce Landing page redirection for unauthenticated users
+  useEffect(() => {
+    if (!authToken && currentTab !== "landing") {
+      setCurrentTab("landing");
+    }
+  }, [authToken, currentTab]);
 
   // Check session status
   const checkSession = async () => {
@@ -439,8 +449,31 @@ export default function App() {
     try {
       const res = await apiFetch("/api/admin/stats");
       if (res.ok) setAdminStats(await res.json());
+
+      const subRes = await apiFetch("/api/admin/subscribers");
+      if (subRes.ok) setSubscribers(await subRes.json());
     } catch (err) {
       console.error("Failed to load admin stats", err);
+    }
+  };
+
+  const handleUpdateSubscriber = async (username: string, planName: string, creditsTotal: number, creditsUsed: number) => {
+    try {
+      const res = await apiFetch("/api/admin/subscribers/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, planName, creditsTotal, creditsUsed })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        triggerToast("Subscriber updated successfully!", "success");
+        loadAdminStats();
+      } else {
+        triggerToast(data.message || "Failed to update subscriber", "error");
+      }
+    } catch (err) {
+      console.error("Error updating subscriber", err);
+      triggerToast("An error occurred while updating subscriber info", "error");
     }
   };
 
@@ -1376,73 +1409,81 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             >
               Landing
             </button>
-            <button
-              onClick={() => {
-                setCurrentTab("dashboard");
-                loadDatabaseContext();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "dashboard" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => setCurrentTab("toolkit")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "toolkit" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              PDF Toolkit
-            </button>
-            <button
-              onClick={() => setCurrentTab("ai-workspace")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "ai-workspace" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              AI Workspace
-            </button>
-            <button
-              onClick={() => setCurrentTab("documents")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "documents" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Cloud Vault
-            </button>
-            <button
-              onClick={() => setCurrentTab("billing")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "billing" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Billing & API
-            </button>
-            <button
-              onClick={() => setCurrentTab("documentation")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "documentation" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              API Docs
-            </button>
-            <button
-              onClick={() => setCurrentTab("support")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                currentTab === "support" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Support
-            </button>
-            <button
-              onClick={() => setCurrentTab("admin")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-700/60 hover:border-slate-600 transition ${
-                currentTab === "admin" ? "bg-indigo-600 text-white" : "text-indigo-400 hover:text-indigo-300"
-              }`}
-            >
-              Super Admin
-            </button>
+            {authToken && (
+              <>
+                <button
+                  onClick={() => {
+                    setCurrentTab("dashboard");
+                    loadDatabaseContext();
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "dashboard" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={() => setCurrentTab("toolkit")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "toolkit" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  PDF Toolkit
+                </button>
+                <button
+                  onClick={() => setCurrentTab("ai-workspace")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "ai-workspace" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  AI Workspace
+                </button>
+                <button
+                  onClick={() => setCurrentTab("documents")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "documents" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Cloud Vault
+                </button>
+                {isOwner && (
+                  <button
+                    onClick={() => setCurrentTab("billing")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      currentTab === "billing" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    Billing & API
+                  </button>
+                )}
+                <button
+                  onClick={() => setCurrentTab("documentation")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "documentation" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  API Docs
+                </button>
+                <button
+                  onClick={() => setCurrentTab("support")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    currentTab === "support" ? "bg-slate-800 text-white" : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Support
+                </button>
+                {isOwner && (
+                  <button
+                    onClick={() => setCurrentTab("admin")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-700/60 hover:border-slate-600 transition ${
+                      currentTab === "admin" ? "bg-indigo-600 text-white" : "text-indigo-400 hover:text-indigo-300"
+                    }`}
+                  >
+                    Super Admin
+                  </button>
+                )}
+              </>
+            )}
           </nav>
 
           {/* Quick Stats Right panel badge / Auth State */}
@@ -1472,7 +1513,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 <button
                   onClick={() => {
                     setAuthMode("login");
-                    setCurrentTab("dashboard");
+                    setCurrentTab("landing");
                   }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white transition cursor-pointer"
                 >
@@ -1481,7 +1522,7 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                 <button
                   onClick={() => {
                     setAuthMode("register");
-                    setCurrentTab("dashboard");
+                    setCurrentTab("landing");
                   }}
                   className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-xl text-xs font-semibold hover:opacity-95 shadow-md transition cursor-pointer"
                 >
@@ -1513,14 +1554,16 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             <div className="px-4 py-3 space-y-1">
               {[
                 { tab: "landing", label: "Landing Home" },
-                { tab: "dashboard", label: "My Dashboard" },
-                { tab: "toolkit", label: "PDF Toolkit" },
-                { tab: "ai-workspace", label: "AI Workspace" },
-                { tab: "documents", label: "Cloud Vault" },
-                { tab: "billing", label: "Billing & APIs" },
-                { tab: "documentation", label: "Developer Docs" },
-                { tab: "support", label: "Get Support" },
-                { tab: "admin", label: "Super Admin" }
+                ...(authToken ? [
+                  { tab: "dashboard", label: "My Dashboard" },
+                  { tab: "toolkit", label: "PDF Toolkit" },
+                  { tab: "ai-workspace", label: "AI Workspace" },
+                  { tab: "documents", label: "Cloud Vault" },
+                  ...(isOwner ? [{ tab: "billing", label: "Billing & APIs" }] : []),
+                  { tab: "documentation", label: "Developer Docs" },
+                  { tab: "support", label: "Get Support" },
+                  ...(isOwner ? [{ tab: "admin", label: "Super Admin" }] : [])
+                ] : [])
               ].map((item) => (
                 <button
                   key={item.tab}
@@ -1670,8 +1713,12 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
           <div className="py-12 sm:py-20 space-y-24">
             
             {/* Hero Stage */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold uppercase tracking-wider">
+            <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${authToken ? 'text-center space-y-8' : ''}`}>
+              {!authToken ? (
+                /* Unauthenticated Split Landing / Registration Layout */
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center text-left">
+                  <div className="lg:col-span-7 space-y-8">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold uppercase tracking-wider">
                 <Sparkles className="w-3.5 h-3.5" /> Next-Generation AI Engine Active
               </div>
               <h1 className="text-4xl sm:text-6xl font-display font-extrabold tracking-tight max-w-4xl mx-auto leading-tight text-white">
@@ -1680,21 +1727,172 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
               <p className="text-gray-400 text-base sm:text-xl max-w-2xl mx-auto font-light leading-relaxed">
                 Run rigorous contract audits, summarize long financial statements, generate clean signable PDFs, and edit document structures with cryptographic safety. No watermarks. No data leaks.
               </p>
-              
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                <button
-                  onClick={() => setCurrentTab("toolkit")}
-                  className="w-full sm:w-auto bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:opacity-90 text-white font-medium px-8 py-3.5 rounded-xl text-sm shadow-xl hover:shadow-indigo-500/20 transition flex items-center justify-center gap-2"
-                >
-                  Open PDF Toolkit <ChevronRight className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setCurrentTab("ai-workspace")}
-                  className="w-full sm:w-auto border border-slate-700 hover:border-slate-600 bg-slate-900/60 hover:bg-slate-900 text-gray-200 font-medium px-8 py-3.5 rounded-xl text-sm transition flex items-center justify-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4 text-indigo-400" /> Test AI Summaries
-                </button>
-              </div>
+                    {/* Multi-Tool preview list */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                      {[
+                        { icon: Merge, label: "Merge & Split Docs", count: "100% Free" },
+                        { icon: RefreshCw, label: "Advanced Compression", count: "Max Quality" },
+                        { icon: Cpu, label: "Gemini Summaries", count: "Ultra Smart" },
+                        { icon: Lock, label: "Cryptographic Protection", count: "Military Grade" }
+                      ].map((item, i) => (
+                        <div key={i} className="p-4 rounded-xl border border-slate-800 bg-[#0e1424]/40 flex gap-3 items-start">
+                          <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                            <item.icon className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-white">{item.label}</div>
+                            <div className="text-[10px] text-indigo-400 font-mono mt-0.5">{item.count}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Elegant Embedded Registration Form Container */}
+                  <div className="lg:col-span-5">
+                    <div className="p-8 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6 shadow-2xl relative overflow-hidden text-left">
+                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                      <div className="text-center space-y-2 relative z-10">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white flex items-center justify-center mx-auto shadow-lg mb-4">
+                          {authMode === "login" ? <Lock className="w-6 h-6" /> : <Shield className="w-6 h-6" />}
+                        </div>
+                        <h2 className="text-2xl font-display font-bold text-white">
+                          {authMode === "login" ? "Welcome Back" : "Register Account"}
+                        </h2>
+                        <p className="text-xs text-gray-400">
+                          {authMode === "login" 
+                            ? "Enter your credentials to access your secure PDF cockpit" 
+                            : "Get 100 monthly credits and secure cloud vaults instantly"}
+                        </p>
+                      </div>
+
+                      <form onSubmit={handleAuthSubmit} className="space-y-4 relative z-10">
+                        {authMode === "register" && (
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Email Address</label>
+                            <input
+                              type="email"
+                              value={authEmail}
+                              onChange={(e) => setAuthEmail(e.target.value)}
+                              placeholder="e.g. you@company.com"
+                              required
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">
+                            {authMode === "login" ? "Username or Email" : "Username"}
+                          </label>
+                          <input
+                            type="text"
+                            value={authUsername}
+                            onChange={(e) => setAuthUsername(e.target.value)}
+                            placeholder={authMode === "login" ? "Enter your username or email" : "Create a username"}
+                            required
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block">Password</label>
+                            {authMode === "login" && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowForgotPassword(true);
+                                  setForgotPasswordIdentity(authUsername);
+                                  setForgotPasswordStep(1);
+                                  setForgotPasswordSimulatedCode("");
+                                }}
+                                className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 transition outline-none cursor-pointer"
+                              >
+                                Forgot Password?
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <input
+                              type={showPassword ? "text" : "password"}
+                              value={authPassword}
+                              onChange={(e) => setAuthPassword(e.target.value)}
+                              placeholder="••••••••"
+                              required
+                              className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition outline-none cursor-pointer"
+                              title={showPassword ? "Hide Password" : "Show Password"}
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isAuthLoading}
+                          className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white py-3 rounded-xl text-xs font-bold shadow-lg transition duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isAuthLoading ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>Processing...</span>
+                            </>
+                          ) : (
+                            <span>{authMode === "login" ? "Sign In" : "Register and Continue"}</span>
+                          )}
+                        </button>
+                      </form>
+
+                      <div className="text-center pt-2 text-xs relative z-10 border-t border-slate-800/60">
+                        <span className="text-gray-500">
+                          {authMode === "login" ? "Don't have an account yet?" : "Already registered?"}
+                        </span>{" "}
+                        <button
+                          onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
+                          className="text-indigo-400 hover:text-indigo-300 font-semibold hover:underline font-mono"
+                        >
+                          {authMode === "login" ? "Create an Account" : "Log In"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Authenticated Landing Page Hero */
+                <div className="text-center space-y-8 animate-fade-in">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold uppercase tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5" /> Next-Generation AI Engine Active
+                  </div>
+                  <h1 className="text-4xl sm:text-6xl font-display font-extrabold tracking-tight max-w-4xl mx-auto leading-tight text-white">
+                    The Secure, High-Performance <span className="bg-gradient-to-r from-indigo-400 via-sky-300 to-purple-400 bg-clip-text text-transparent">AI-Augmented PDF Suite</span> for Enterprises.
+                  </h1>
+                  <p className="text-gray-400 text-base sm:text-xl max-w-2xl mx-auto font-light leading-relaxed">
+                    Run rigorous contract audits, summarize long financial statements, generate clean signable PDFs, and edit document structures with cryptographic safety. No watermarks. No data leaks.
+                  </p>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <button
+                      onClick={() => setCurrentTab("toolkit")}
+                      className="w-full sm:w-auto bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:opacity-90 text-white font-medium px-8 py-3.5 rounded-xl text-sm shadow-xl hover:shadow-indigo-500/20 transition flex items-center justify-center gap-2"
+                    >
+                      Open PDF Toolkit <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setCurrentTab("ai-workspace")}
+                      className="w-full sm:w-auto border border-slate-700 hover:border-slate-600 bg-slate-900/60 hover:bg-slate-900 text-gray-200 font-medium px-8 py-3.5 rounded-xl text-sm transition flex items-center justify-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4 text-indigo-400" /> Test AI Summaries
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Multi-Tool grid preview */}
               <div className="pt-16 max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -2112,6 +2310,11 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                       <button
                         key={tool.id}
                         onClick={() => {
+                          const isRestricted = (subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress"].includes(tool.id);
+                          if (isRestricted) {
+                            triggerToast(`The "${tool.name}" tool is exclusive to Paid subscriptions. Please upgrade!`, "warning");
+                            return;
+                          }
                           setActiveToolId(tool.id);
                           setSelectedFile(null);
                           setSelectedFiles([]);
@@ -2129,6 +2332,9 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                           {tool.category === "conversion" && <FileText className="w-3.5 h-3.5" />}
                           {tool.category === "edit" && <Edit className="w-3.5 h-3.5" />}
                           <span className="truncate">{tool.name}</span>
+                          {(subscription?.planName === "Free" || !subscription) && !["merge", "split", "compress"].includes(tool.id) && (
+                            <Lock className="w-3 h-3 text-rose-400 shrink-0 ml-1" />
+                          )}
                         </div>
                         {tool.badge && (
                           <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-slate-900 text-indigo-400 border border-slate-800">
@@ -3635,6 +3841,56 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
 
             </div>
 
+            {/* Subscriber Database Management */}
+            <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
+                    <Users className="w-5 h-5 text-indigo-400" /> Subscriber Management Registry
+                  </h2>
+                  <p className="text-gray-400 text-xs mt-1">Direct read/write access to the database of active platform subscribers.</p>
+                </div>
+                
+                {/* Search Bar */}
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                    <Search className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    value={adminSubSearch}
+                    onChange={(e) => setAdminSubSearch(e.target.value)}
+                    placeholder="Search by username or email..."
+                    className="w-full sm:w-64 pl-9 pr-4 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {subscribers.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 text-xs">
+                    No active subscribers found in the database.
+                  </div>
+                ) : (
+                  subscribers
+                    .filter((sub) => {
+                      const query = adminSubSearch.toLowerCase();
+                      return (
+                        sub.username?.toLowerCase().includes(query) ||
+                        sub.email?.toLowerCase().includes(query)
+                      );
+                    })
+                    .map((sub) => (
+                      <SubscriberRow
+                        key={sub.username}
+                        sub={sub}
+                        onSave={handleUpdateSubscriber}
+                      />
+                    ))
+                )}
+              </div>
+            </div>
+
             {/* Audit log trail listing */}
             <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424]/40 space-y-4">
               <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
@@ -3821,3 +4077,60 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
     </div>
   );
 }
+
+const SubscriberRow = ({ sub, onSave }: { sub: any; onSave: (username: string, planName: string, creditsTotal: number, creditsUsed: number) => void; key?: any }) => {
+  const [plan, setPlan] = useState(sub.planName || "Free");
+  const [total, setTotal] = useState(sub.creditsTotal || 100);
+  const [used, setUsed] = useState(sub.creditsUsed || 0);
+
+  return (
+    <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+      <div className="space-y-1">
+        <div className="font-semibold text-white text-sm">{sub.username}</div>
+        <div className="text-gray-400 text-[11px]">{sub.email}</div>
+        <div className="text-[10px] text-gray-500 font-mono">ID: {sub.id || "N/A"}</div>
+      </div>
+      
+      <div className="grid grid-cols-2 md:flex md:items-center gap-3">
+        <div>
+          <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1">Plan</label>
+          <select
+            value={plan}
+            onChange={(e) => setPlan(e.target.value)}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white outline-none focus:border-indigo-500"
+          >
+            <option value="Free">Free</option>
+            <option value="Pro">Pro</option>
+            <option value="Enterprise">Enterprise</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1">Total Credits</label>
+          <input
+            type="number"
+            value={total}
+            onChange={(e) => setTotal(parseInt(e.target.value) || 0)}
+            className="w-20 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white outline-none focus:border-indigo-500 font-mono"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1">Used Credits</label>
+          <input
+            type="number"
+            value={used}
+            onChange={(e) => setUsed(parseInt(e.target.value) || 0)}
+            className="w-20 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white outline-none focus:border-indigo-500 font-mono"
+          />
+        </div>
+        <div className="flex items-end col-span-2 md:col-span-1 pt-4 md:pt-0">
+          <button
+            onClick={() => onSave(sub.username, plan, total, used)}
+            className="w-full md:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <Check className="w-3.5 h-3.5" /> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
