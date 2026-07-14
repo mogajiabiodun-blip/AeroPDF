@@ -78,6 +78,105 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+const RichTextRenderer = ({ text, theme = "modern" }: { text: string; theme?: "modern" | "serif" | "tech" | "classic" }) => {
+  if (!text) return null;
+  
+  const lines = text.split("\n");
+  
+  // Decide container font pairing classes
+  let containerClass = "font-sans text-gray-300 leading-relaxed space-y-4";
+  let h1Class = "font-extrabold text-2xl tracking-tight text-white mt-6 mb-3";
+  let h2Class = "font-bold text-xl text-indigo-300 mt-5 mb-2.5";
+  let h3Class = "font-semibold text-lg text-indigo-400 mt-4 mb-2";
+  let quoteClass = "border-l-4 border-indigo-500 pl-4 py-1.5 my-4 bg-slate-900/50 rounded-r-xl italic text-gray-400";
+  let listClass = "ml-6 list-disc text-gray-300 space-y-1.5";
+
+  if (theme === "serif") {
+    containerClass = "font-sans text-gray-300 leading-relaxed space-y-4";
+    h1Class = "font-serif font-bold text-3xl tracking-tight text-white mt-6 mb-3";
+    h2Class = "font-serif font-semibold text-2xl text-indigo-200 mt-5 mb-2.5";
+    h3Class = "font-serif font-medium text-xl text-indigo-300 mt-4 mb-2";
+    quoteClass = "border-l-4 border-indigo-400 pl-4 py-2 my-5 bg-slate-900/40 rounded-r-xl italic text-gray-400 font-serif text-base";
+    listClass = "ml-6 list-disc text-gray-300 space-y-1.5";
+  } else if (theme === "tech") {
+    containerClass = "font-mono text-gray-300 text-xs leading-relaxed space-y-4";
+    h1Class = "font-mono font-bold text-xl uppercase tracking-wider text-indigo-400 mt-6 mb-3 border-b border-indigo-950/60 pb-1";
+    h2Class = "font-mono font-bold text-base uppercase text-emerald-400 mt-5 mb-2.5";
+    h3Class = "font-mono font-semibold text-sm text-cyan-400 mt-4 mb-2";
+    quoteClass = "border-l-2 border-emerald-500 pl-3 py-1.5 my-4 bg-slate-950/60 font-mono text-[11px] text-gray-400";
+    listClass = "ml-4 list-none text-gray-300 space-y-1.5 pl-0";
+  } else if (theme === "classic") {
+    containerClass = "font-sans text-slate-300 leading-relaxed space-y-4";
+    h1Class = "font-sans font-black text-2xl uppercase tracking-tight text-white mt-6 mb-3";
+    h2Class = "font-sans font-extrabold text-lg text-slate-200 mt-5 mb-2.5";
+    h3Class = "font-sans font-bold text-sm text-slate-400 mt-4 mb-2";
+    quoteClass = "border-l-4 border-slate-500 pl-4 py-1 my-4 bg-slate-900/60 italic text-slate-400";
+    listClass = "ml-6 list-disc text-slate-300 space-y-1.5";
+  }
+
+  return (
+    <div className={containerClass}>
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-2" />;
+        
+        // Headers
+        if (trimmed.startsWith("# ")) {
+          return (
+            <h1 key={idx} className={h1Class}>
+              {trimmed.substring(2)}
+            </h1>
+          );
+        }
+        if (trimmed.startsWith("## ")) {
+          return (
+            <h2 key={idx} className={h2Class}>
+              {trimmed.substring(3)}
+            </h2>
+          );
+        }
+        if (trimmed.startsWith("### ")) {
+          return (
+            <h3 key={idx} className={h3Class}>
+              {trimmed.substring(4)}
+            </h3>
+          );
+        }
+        
+        // Blockquote
+        if (trimmed.startsWith("> ")) {
+          return (
+            <blockquote key={idx} className={quoteClass}>
+              {trimmed.substring(2)}
+            </blockquote>
+          );
+        }
+        
+        // Bullet list
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+          return (
+            <ul key={idx} className={listClass}>
+              <li className="list-inside">
+                {theme === "tech" ? ">> " : ""}
+                {trimmed.substring(2)}
+              </li>
+            </ul>
+          );
+        }
+
+        // Inline formatting parse
+        let content: React.ReactNode = trimmed;
+        if (trimmed.includes("**")) {
+          const parts = trimmed.split("**");
+          content = parts.map((part, pIdx) => pIdx % 2 === 1 ? <strong key={pIdx} className="font-bold text-white">{part}</strong> : part);
+        }
+        
+        return <p key={idx} className="leading-relaxed">{content}</p>;
+      })}
+    </div>
+  );
+};
+
 export default function App() {
   // Navigation State
   const [currentTab, setCurrentTab] = useState<TabType>("landing");
@@ -175,7 +274,36 @@ export default function App() {
   const [adminBlogExcerpt, setAdminBlogExcerpt] = useState("");
   const [adminBlogAuthor, setAdminBlogAuthor] = useState("Super Admin");
   const [adminBlogCategory, setAdminBlogCategory] = useState("Productivity");
-  const [adminBlogs, setAdminBlogs] = useState(BLOG_POSTS);
+  const [adminBlogContent, setAdminBlogContent] = useState("");
+  const [adminBlogFontTheme, setAdminBlogFontTheme] = useState<"modern" | "serif" | "tech" | "classic">("modern");
+  const [editingBlogId, setEditingBlogId] = useState<string | null>(null);
+  const [activeBlogDetail, setActiveBlogDetail] = useState<any | null>(null);
+  const [adminBlogs, setAdminBlogs] = useState<any[]>(() => {
+    return BLOG_POSTS.map(post => {
+      if (post.id === "blog-1") {
+        return {
+          ...post,
+          content: `# Unlocking Productivity: The Ultimate Guide to AI PDF Summaries\n\n## Save Up To 12 Hours Every Week\n\nDiscover how legal and finance teams save up to 12 hours a week using next-generation LLM summaries for long-form reports. In today's fast-paced corporate landscape, documents are growing longer, while time is getting shorter.\n\n### Why AI Summaries are the Future\n\nWith AeroPDF Suite, extracting core details takes seconds rather than hours. Here's what modern teams are doing:\n\n- **Automated Clause Detection**: Highlighting hidden indemnity or SLA conditions instantly.\n- **Executive Summaries**: High-density overviews tailored for quick decision-making.\n- **Targeted Search**: Asking the document specific questions directly.\n\n> "AeroPDF completely redefined how our associate attorneys analyze draft agreements. We've slashed review turnaround times by more than 50%."\n\n### Secure & Confidential Compliance\n\nWe ensure all processed data remains private and resides strictly in memory, meeting top-tier security compliance regulations.`,
+          fontTheme: "modern"
+        };
+      }
+      if (post.id === "blog-2") {
+        return {
+          ...post,
+          content: `# Understanding SOC-2 and Cloud Document Compliance\n\n## What is SOC-2 Type II Compliance?\n\nWhat enterprise compliance guidelines mean for your cloud documents, and how to verify cryptographic security in digital signatures. Security isn't just a feature; it's the core foundation of trust.\n\n### Core Security Standards in PDF Processing\n\nWhen dealing with confidential contracts, certificates, and payroll files, the infrastructure must align with strict cryptographic principles:\n\n- **End-to-End Encryption**: Secure 256-bit AES encryption at-rest and in-transit.\n- **Metadata Scrubbing**: Removing author history, tracking pixels, and software version tags.\n- **Audit Logs**: Keeping detailed timelines of who touched which document and when.\n\n> "A secure PDF pipeline isn't optional for enterprise customers. It is a critical risk vector that needs robust protection."\n\n### Verifying Digital Signatures\n\nOur tool uses official public/private key verification certificates to stamp valid SHA-256 signatures on-chain, rendering documents tamper-proof.`,
+          fontTheme: "serif"
+        };
+      }
+      if (post.id === "blog-3") {
+        return {
+          ...post,
+          content: `# Top 5 PDF Secrets of High-Performance Legal Teams\n\n## Secrets of Elite Law Firms\n\nFrom deep metadata scrubbing to structural page-level redaction, explore the processes elite legal councils use before filing in court.\n\n### 1. Cryptographic Redaction (Not just drawing black boxes)\n\nMany inexperienced teams draw a black rectangle over sensitive text, leaving the underlying text vector searchable. True redaction physically scrubs the characters from the PDF byte stream.\n\n### 2. High-Density Layout Compression\n\nCourt systems have strict file size limits (often 25MB). Legal teams use advanced page stream down-sampling to shrink files to 10% size without losing font clarity.\n\n> "We used to struggle with e-filing system errors due to file size limits. AeroPDF's advanced toolkit fixed that instantly."\n\n### 3. Dynamic Page-Range Isolation\n\nRather than splitting and merging manually, high-performance paralegals isolate key exhibit pages instantly with custom ranges (e.g. 1-3, 14-19) in a single operation.`,
+          fontTheme: "tech"
+        };
+      }
+      return { ...post, content: post.excerpt, fontTheme: "modern" };
+    });
+  });
 
   // Lemon Squeezy integration states
   const [lemonSqueezyEnabled, setLemonSqueezyEnabled] = useState(false);
@@ -1284,21 +1412,113 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
   };
 
   const handleCreateBlog = () => {
-    if (!adminBlogTitle || !adminBlogExcerpt) return;
-    const newBlog = {
-      id: "blog-" + Date.now(),
-      title: adminBlogTitle,
-      excerpt: adminBlogExcerpt,
-      date: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-      category: adminBlogCategory || "SaaS Update",
-      author: adminBlogAuthor || "Super Admin"
-    };
-    setAdminBlogs(prev => [newBlog, ...prev]);
+    if (!adminBlogTitle || !adminBlogExcerpt) {
+      triggerToast("Please provide both an Article Title and an Excerpt summary.", "warning");
+      return;
+    }
+    
+    if (editingBlogId) {
+      // Edit mode
+      setAdminBlogs(prev => prev.map(blog => {
+        if (blog.id === editingBlogId) {
+          return {
+            ...blog,
+            title: adminBlogTitle,
+            excerpt: adminBlogExcerpt,
+            content: adminBlogContent || adminBlogExcerpt,
+            author: adminBlogAuthor || "Super Admin",
+            category: adminBlogCategory || "Productivity",
+            fontTheme: adminBlogFontTheme
+          };
+        }
+        return blog;
+      }));
+      triggerToast("Blog post updated successfully!", "success");
+      setEditingBlogId(null);
+    } else {
+      // Create mode
+      const newBlog = {
+        id: "blog-" + Date.now(),
+        title: adminBlogTitle,
+        excerpt: adminBlogExcerpt,
+        content: adminBlogContent || adminBlogExcerpt,
+        date: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+        category: adminBlogCategory || "Productivity",
+        author: adminBlogAuthor || "Super Admin",
+        fontTheme: adminBlogFontTheme
+      };
+      setAdminBlogs(prev => [newBlog, ...prev]);
+      triggerToast("Blog post published successfully!", "success");
+    }
+
+    // Reset fields
     setAdminBlogTitle("");
     setAdminBlogExcerpt("");
+    setAdminBlogContent("");
     setAdminBlogAuthor("Super Admin");
     setAdminBlogCategory("Productivity");
-    triggerToast("Blog post published successfully!", "success");
+    setAdminBlogFontTheme("modern");
+  };
+
+  const handleStartEditBlog = (blog: any) => {
+    setEditingBlogId(blog.id);
+    setAdminBlogTitle(blog.title || "");
+    setAdminBlogExcerpt(blog.excerpt || "");
+    setAdminBlogContent(blog.content || blog.excerpt || "");
+    setAdminBlogAuthor(blog.author || "Super Admin");
+    setAdminBlogCategory(blog.category || "Productivity");
+    setAdminBlogFontTheme(blog.fontTheme || "modern");
+    
+    // Smooth scroll to the editor form
+    const formElement = document.getElementById("cms-editor-form");
+    if (formElement) {
+      formElement.scrollIntoView({ behavior: "smooth" });
+    }
+    triggerToast(`Loaded "${blog.title}" into CMS editor.`, "info");
+  };
+
+  const handleCancelEditBlog = () => {
+    setEditingBlogId(null);
+    setAdminBlogTitle("");
+    setAdminBlogExcerpt("");
+    setAdminBlogContent("");
+    setAdminBlogAuthor("Super Admin");
+    setAdminBlogCategory("Productivity");
+    setAdminBlogFontTheme("modern");
+    triggerToast("Editing cancelled", "info");
+  };
+
+  const handleInsertMarkup = (markup: string) => {
+    const textarea = document.getElementById("blog-body-textarea") as HTMLTextAreaElement;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = adminBlogContent;
+      const before = text.substring(0, start);
+      const after = text.substring(end, text.length);
+      const newText = before + markup + after;
+      setAdminBlogContent(newText);
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + markup.length, start + markup.length);
+      }, 50);
+    } else {
+      setAdminBlogContent(prev => prev + markup);
+    }
+  };
+
+  const handleDeleteBlog = (id: string) => {
+    setAdminBlogs(prev => prev.filter(b => b.id !== id));
+    if (editingBlogId === id) {
+      setEditingBlogId(null);
+      setAdminBlogTitle("");
+      setAdminBlogExcerpt("");
+      setAdminBlogContent("");
+      setAdminBlogAuthor("Super Admin");
+      setAdminBlogCategory("Productivity");
+      setAdminBlogFontTheme("modern");
+    }
+    triggerToast("Blog post deleted from CMS feed", "warning");
   };
 
   // Filtering docs
@@ -1520,6 +1740,77 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                   </div>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Blog Article Detail Overlay Modal */}
+      <AnimatePresence>
+        {activeBlogDetail && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-3xl my-8 p-6 sm:p-10 rounded-3xl border border-slate-800 bg-[#0c101d] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col animate-fadeIn"
+            >
+              {/* Top ambient color glow */}
+              <div className="absolute top-0 left-1/4 w-96 h-40 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 right-1/4 w-96 h-40 bg-purple-600/5 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Modal header row */}
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-6 relative z-10">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider font-mono bg-indigo-950/50 px-2.5 py-1 rounded-lg border border-indigo-900/50">
+                    {activeBlogDetail.category}
+                  </span>
+                  <span className="text-xs text-gray-500 font-mono">Published on {activeBlogDetail.date}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveBlogDetail(null)}
+                  className="p-1.5 rounded-xl text-gray-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer outline-none"
+                  title="Close Article"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Scrollable Article Body */}
+              <div className="flex-1 overflow-y-auto pr-2 space-y-6 relative z-10 custom-scrollbar scroll-smooth">
+                {/* Author attribution header card */}
+                <div className="flex items-center gap-3.5 bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold font-display text-sm tracking-wide shadow-md">
+                    {activeBlogDetail.author ? activeBlogDetail.author.charAt(0) : "A"}
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Written By</div>
+                    <div className="text-xs font-bold text-white font-sans">{activeBlogDetail.author || "AeroPDF Editorial"}</div>
+                  </div>
+                </div>
+
+                {/* Excerpt intro */}
+                <p className="text-sm italic text-gray-400 leading-relaxed border-l-2 border-indigo-500/40 pl-4 font-sans py-0.5">
+                  "{activeBlogDetail.excerpt}"
+                </p>
+
+                {/* Styled detailed body renderer */}
+                <div className="pt-2">
+                  <RichTextRenderer text={activeBlogDetail.content || activeBlogDetail.excerpt} theme={activeBlogDetail.fontTheme} />
+                </div>
+              </div>
+
+              {/* Footer CTA */}
+              <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-gray-500 relative z-10">
+                <span className="font-mono">Font Theme: <strong className="text-indigo-400 uppercase font-bold">{activeBlogDetail.fontTheme || "modern"}</strong></span>
+                <button
+                  onClick={() => setActiveBlogDetail(null)}
+                  className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-gray-300 hover:text-white font-semibold transition cursor-pointer"
+                >
+                  Finished Reading
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -2228,16 +2519,23 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
               <h2 className="text-xl sm:text-3xl font-display font-bold text-center text-white">Recent Compliance & Productivity Blogs</h2>
               <div className="grid md:grid-cols-3 gap-6">
                 {adminBlogs.slice(0, 3).map((post) => (
-                  <div key={post.id} className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 space-y-3 flex flex-col justify-between">
+                  <div
+                    key={post.id}
+                    onClick={() => setActiveBlogDetail(post)}
+                    className="p-5 rounded-2xl border border-slate-800/80 bg-slate-900/40 space-y-4 flex flex-col justify-between hover:border-indigo-500/50 hover:bg-slate-900/70 transition-all duration-300 cursor-pointer group shadow-xl hover:shadow-indigo-500/5"
+                  >
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider font-mono">
-                        {post.category}
-                      </span>
-                      <h3 className="font-semibold text-sm text-white mt-1 mb-2 leading-snug">{post.title}</h3>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider font-mono bg-indigo-950/40 px-2 py-0.5 rounded-md border border-indigo-900/40">
+                          {post.category}
+                        </span>
+                        <span className="text-[9px] text-gray-500 font-medium font-mono group-hover:text-indigo-400 transition-colors">Read Article &rarr;</span>
+                      </div>
+                      <h3 className="font-semibold text-sm text-white mt-2.5 mb-2 leading-snug group-hover:text-indigo-200 transition-colors">{post.title}</h3>
                       <p className="text-gray-400 text-xs line-clamp-3 leading-relaxed">{post.excerpt}</p>
                     </div>
-                    <div className="pt-4 flex items-center justify-between text-[10px] text-gray-500">
-                      <span>By {post.author}</span>
+                    <div className="pt-3 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-gray-500">
+                      <span className="font-medium text-gray-400">By {post.author}</span>
                       <span>{post.date}</span>
                     </div>
                   </div>
@@ -4107,92 +4405,306 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
             )}
 
             {/* CMS / Feature flag configs split */}
-            <div className="grid lg:grid-cols-3 gap-8">
+            <div className="grid lg:grid-cols-3 gap-8" id="cms-editor-form">
               
-              {/* Blog and FAQ CMS updater */}
-              <div className="lg:col-span-2 p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6">
-                <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
-                  <Edit className="w-5 h-5 text-indigo-400" /> CMS Blog Article Publisher
-                </h2>
+              {/* Blog CMS Editor and Text Styler */}
+              <div className="lg:col-span-2 p-6 sm:p-8 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-32 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                 
-                <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
                   <div>
-                    <label className="text-xs text-gray-400">Article Title</label>
-                    <input
-                      type="text"
-                      value={adminBlogTitle}
-                      onChange={(e) => setAdminBlogTitle(e.target.value)}
-                      placeholder="e.g. AeroPDF Q3 Product Roadmap"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs mt-1 text-white"
-                    />
+                    <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
+                      <Edit className="w-5 h-5 text-indigo-400" /> {editingBlogId ? "Modify & Format Blog Article" : "CMS Blog Publisher & Text Styler"}
+                    </h2>
+                    <p className="text-[11px] text-gray-400 mt-0.5">Write, style, and publish high-contrast interactive articles to the landing feed.</p>
                   </div>
-                  <div>
-                    <label className="text-xs text-gray-400">Excerpt summary</label>
-                    <textarea
-                      rows={3}
-                      value={adminBlogExcerpt}
-                      onChange={(e) => setAdminBlogExcerpt(e.target.value)}
-                      placeholder="Enter teaser paragraph..."
-                      className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs resize-none text-white"
-                    />
+                  {editingBlogId && (
+                    <span className="px-2.5 py-1 bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-lg text-[10px] font-mono flex items-center gap-1 shrink-0 animate-pulse">
+                      Editing Mode Active
+                    </span>
+                  )}
+                </div>
+
+                {editingBlogId && (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between text-xs gap-3">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-gray-500 font-mono">Currently editing:</span>
+                      <p className="font-semibold text-indigo-300 truncate mt-0.5">"{adminBlogTitle || "Untitled Article"}"</p>
+                    </div>
+                    <button
+                      onClick={handleCancelEditBlog}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-gray-400 hover:text-white text-[10px] border border-slate-800 font-semibold cursor-pointer shrink-0 transition"
+                    >
+                      Cancel Edit
+                    </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs text-gray-400">Author Name</label>
+                )}
+                
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Article Title</label>
                       <input
                         type="text"
-                        value={adminBlogAuthor}
-                        onChange={(e) => setAdminBlogAuthor(e.target.value)}
-                        placeholder="e.g. Super Admin"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs mt-1 text-white"
+                        value={adminBlogTitle}
+                        onChange={(e) => setAdminBlogTitle(e.target.value)}
+                        placeholder="e.g. AeroPDF Q3 Product Roadmap"
+                        className="w-full px-3.5 py-2 mt-1 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-400">Category / Tag</label>
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Category / Tag</label>
                       <input
                         type="text"
                         value={adminBlogCategory}
                         onChange={(e) => setAdminBlogCategory(e.target.value)}
                         placeholder="e.g. Productivity"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs mt-1 text-white"
+                        className="w-full px-3.5 py-2 mt-1 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition"
                       />
                     </div>
                   </div>
-                  <button
-                    onClick={handleCreateBlog}
-                    className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold"
-                  >
-                    Publish to Landing Feed
-                  </button>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Author Name</label>
+                      <input
+                        type="text"
+                        value={adminBlogAuthor}
+                        onChange={(e) => setAdminBlogAuthor(e.target.value)}
+                        placeholder="e.g. Sarah Sterling"
+                        className="w-full px-3.5 py-2 mt-1 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition font-sans"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Visual Font Theme</label>
+                      <select
+                        value={adminBlogFontTheme}
+                        onChange={(e) => setAdminBlogFontTheme(e.target.value as any)}
+                        className="w-full px-3.5 py-2 mt-1 rounded-xl bg-slate-950 border border-slate-800 text-xs text-indigo-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition cursor-pointer font-semibold"
+                      >
+                        <option value="modern">Modern Display (Sans-serif & Outfit)</option>
+                        <option value="serif">Elegant Editorial (Serif headings & Georgia)</option>
+                        <option value="tech">Technical Console (JetBrains Mono tech-style)</option>
+                        <option value="classic">Swiss Minimalist (High contrast sans-serif)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Teaser Excerpt (Card Summary)</label>
+                    <textarea
+                      rows={2}
+                      value={adminBlogExcerpt}
+                      onChange={(e) => setAdminBlogExcerpt(e.target.value)}
+                      placeholder="Enter a brief teaser/summary paragraph displayed on the landing page cards..."
+                      className="w-full p-3.5 mt-1 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition resize-none"
+                    />
+                  </div>
+
+                  {/* Body Content Editor with Quick Formatting Actions */}
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950 p-2 rounded-t-xl border-t border-x border-slate-800">
+                      <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("# ")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition font-bold"
+                          title="Heading 1"
+                        >
+                          H1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("## ")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition font-bold"
+                          title="Heading 2"
+                        >
+                          H2
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("### ")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition font-bold"
+                          title="Heading 3"
+                        >
+                          H3
+                        </button>
+                        <span className="w-[1px] h-3.5 bg-slate-800 mx-1" />
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("**BoldText**")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition font-extrabold"
+                          title="Bold Text"
+                        >
+                          B
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("> Quote text")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition italic"
+                          title="Blockquote"
+                        >
+                          Quote
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleInsertMarkup("- Item ")}
+                          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 rounded text-gray-300 hover:text-white border border-slate-800 transition"
+                          title="Bullet List"
+                        >
+                          List
+                        </button>
+                      </div>
+                      <span className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider mr-1">Rich Text Assistant</span>
+                    </div>
+                    <textarea
+                      id="blog-body-textarea"
+                      rows={8}
+                      value={adminBlogContent}
+                      onChange={(e) => setAdminBlogContent(e.target.value)}
+                      placeholder="Use H1, H2, and H3 to structure sections. Type **word** for bolding, > for blockquotes, or - for list items..."
+                      className="w-full p-3.5 rounded-b-xl bg-slate-950 border-b border-x border-slate-800 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition custom-scrollbar font-mono leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Real-time Interactive Preview Section */}
+                  <div className="p-4 sm:p-5 rounded-2xl border border-slate-800/80 bg-slate-950/40 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider font-mono">
+                        Real-time Aesthetic Live Preview
+                      </span>
+                      <span className="text-[9px] font-mono text-gray-500">
+                        Theme: <strong className="text-gray-300 uppercase">{adminBlogFontTheme}</strong>
+                      </span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto pr-1">
+                      {adminBlogTitle || adminBlogContent || adminBlogExcerpt ? (
+                        <div className="space-y-4">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-indigo-400 font-mono">
+                              {adminBlogCategory || "Productivity"}
+                            </span>
+                            <h2 className={`font-bold mt-1 text-white ${
+                              adminBlogFontTheme === "serif" ? "font-serif text-2xl" :
+                              adminBlogFontTheme === "tech" ? "font-mono text-lg" :
+                              adminBlogFontTheme === "classic" ? "font-sans font-black text-xl" :
+                              "font-display text-xl"
+                            }`}>
+                              {adminBlogTitle || "Untitled Draft Title"}
+                            </h2>
+                            <div className="text-[10px] text-gray-500 mt-1 font-mono">
+                              By {adminBlogAuthor || "Super Admin"} • Just Now
+                            </div>
+                          </div>
+                          {adminBlogExcerpt && (
+                            <p className="text-xs italic text-gray-400 leading-relaxed border-l border-indigo-500/30 pl-3">
+                              "{adminBlogExcerpt}"
+                            </p>
+                          )}
+                          <div className="border-t border-slate-800/40 pt-3">
+                            <RichTextRenderer text={adminBlogContent || "Start typing in the Editor Body to see your beautiful formatted live preview appear here..."} theme={adminBlogFontTheme} />
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-center text-gray-600 text-xs py-6 italic font-mono">
+                          Live styling preview will populate as you type your article details above.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                    <button
+                      onClick={handleCreateBlog}
+                      className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-semibold cursor-pointer shadow-lg hover:shadow-indigo-500/10 transition duration-200"
+                    >
+                      {editingBlogId ? "Save Article Changes" : "Publish to Landing Feed"}
+                    </button>
+                    {editingBlogId && (
+                      <button
+                        onClick={handleCancelEditBlog}
+                        className="w-full sm:w-auto border border-slate-800 hover:border-slate-700 bg-slate-900 text-gray-400 hover:text-white px-5 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition"
+                      >
+                        Discard Changes
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Active feature flags */}
-              <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6">
-                <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-indigo-400" /> Feature Toggles (A/B testing)
-                </h2>
+              {/* CMS Sidebar Content: Managed Blogs & Feature Flags */}
+              <div className="space-y-8">
                 
-                <div className="space-y-4">
-                  {[
-                    { key: "ai_summary", name: "Gemini 3.5 Summaries", desc: "Route processing through Flash model pipelines" },
-                    { key: "ocr_scans", name: "Searchable OCR Engine", desc: "Turn graphics into real PDF text sheets" },
-                    { key: "team_spaces", name: "Collaborative workspaces", desc: "Multi-user folder vaults sharing" }
-                  ].map((flag) => (
-                    <div key={flag.key} className="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs gap-3">
-                      <div>
-                        <span className="font-semibold text-white block">{flag.name}</span>
-                        <span className="text-[10px] text-gray-500 leading-normal block">{flag.desc}</span>
+                {/* Managed Blog Feed List */}
+                <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-4">
+                  <div>
+                    <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
+                      <Bookmark className="w-5 h-5 text-indigo-400" /> Managed Blog Feed
+                    </h2>
+                    <p className="text-[10px] text-gray-500 mt-0.5">Select articles below to edit details or delete from system archives.</p>
+                  </div>
+                  
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                    {adminBlogs.map((post) => (
+                      <div key={post.id} className="p-3 rounded-xl border border-slate-800/80 bg-slate-950/40 flex items-center justify-between gap-3 hover:border-slate-700 transition">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[8px] uppercase font-bold text-indigo-400 font-mono tracking-wider">
+                              {post.category}
+                            </span>
+                            <span className="text-[9px] text-gray-600 font-mono truncate">By {post.author}</span>
+                          </div>
+                          <h4 className="text-xs font-bold text-white truncate mt-0.5">{post.title}</h4>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => handleStartEditBlog(post)}
+                            className="p-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 hover:text-white transition cursor-pointer"
+                            title="Edit Article"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBlog(post.id)}
+                            className="p-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 hover:text-rose-300 transition cursor-pointer"
+                            title="Delete Article"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => toggleFeatureFlag(flag.name)}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-mono text-indigo-400 border border-slate-700 shrink-0"
-                      >
-                        Toggle
-                      </button>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+
+                {/* Active feature flags */}
+                <div className="p-6 rounded-2xl border border-slate-800 bg-[#0e1424] space-y-6">
+                  <h2 className="font-display font-bold text-base text-white flex items-center gap-2">
+                    <Cpu className="w-5 h-5 text-indigo-400" /> Feature Toggles (A/B testing)
+                  </h2>
+                  
+                  <div className="space-y-4">
+                    {[
+                      { key: "ai_summary", name: "Gemini 3.5 Summaries", desc: "Route processing through Flash model pipelines" },
+                      { key: "ocr_scans", name: "Searchable OCR Engine", desc: "Turn graphics into real PDF text sheets" },
+                      { key: "team_spaces", name: "Collaborative workspaces", desc: "Multi-user folder vaults sharing" }
+                    ].map((flag) => (
+                      <div key={flag.key} className="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-xs gap-3">
+                        <div>
+                          <span className="font-semibold text-white block">{flag.name}</span>
+                          <span className="text-[10px] text-gray-500 leading-normal block">{flag.desc}</span>
+                        </div>
+                        <button
+                          onClick={() => toggleFeatureFlag(flag.name)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-[10px] font-mono text-indigo-400 border border-slate-700 shrink-0"
+                        >
+                          Toggle
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
               </div>
 
             </div>
