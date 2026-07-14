@@ -173,6 +173,8 @@ export default function App() {
   const [newKeyName, setNewKeyName] = useState("");
   const [adminBlogTitle, setAdminBlogTitle] = useState("");
   const [adminBlogExcerpt, setAdminBlogExcerpt] = useState("");
+  const [adminBlogAuthor, setAdminBlogAuthor] = useState("Super Admin");
+  const [adminBlogCategory, setAdminBlogCategory] = useState("Productivity");
   const [adminBlogs, setAdminBlogs] = useState(BLOG_POSTS);
 
   // Lemon Squeezy integration states
@@ -1288,12 +1290,14 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
       title: adminBlogTitle,
       excerpt: adminBlogExcerpt,
       date: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-      category: "SaaS Update",
-      author: "Super Admin"
+      category: adminBlogCategory || "SaaS Update",
+      author: adminBlogAuthor || "Super Admin"
     };
     setAdminBlogs(prev => [newBlog, ...prev]);
     setAdminBlogTitle("");
     setAdminBlogExcerpt("");
+    setAdminBlogAuthor("Super Admin");
+    setAdminBlogCategory("Productivity");
     triggerToast("Blog post published successfully!", "success");
   };
 
@@ -4131,6 +4135,28 @@ Licensee agrees to safeguard personal email addresses (e.g., mogajiabiodun@gmail
                       placeholder="Enter teaser paragraph..."
                       className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs resize-none text-white"
                     />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs text-gray-400">Author Name</label>
+                      <input
+                        type="text"
+                        value={adminBlogAuthor}
+                        onChange={(e) => setAdminBlogAuthor(e.target.value)}
+                        placeholder="e.g. Super Admin"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs mt-1 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Category / Tag</label>
+                      <input
+                        type="text"
+                        value={adminBlogCategory}
+                        onChange={(e) => setAdminBlogCategory(e.target.value)}
+                        placeholder="e.g. Productivity"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs mt-1 text-white"
+                      />
+                    </div>
                   </div>
                   <button
                     onClick={handleCreateBlog}
